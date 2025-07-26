@@ -11,7 +11,6 @@ import os
 
 from xgboost import XGBRegressor
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
-from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 # ---------------------------
@@ -28,7 +27,7 @@ def mape(y_true, y_pred):
 # ---------------------------
 # Ρυθμίσεις
 # ---------------------------
-DATA_PATH = "enriched_bdi_dataset.csv"
+DATA_PATH = "Enriched_BDI_Dataset.csv"  # ✅ ΔΙΟΡΘΩΜΕΝΟ
 TARGET = "BDI"
 OUTPUT_DIR = "artifacts_xgb_bdi"
 TEST_SIZE = 0.2
@@ -56,7 +55,7 @@ print(f"Train: {dates_train.min().date()} → {dates_train.max().date()} ({len(X
 print(f"Test : {dates_test.min().date()} → {dates_test.max().date()} ({len(X_test)} δείγματα)")
 
 # ---------------------------
-# 3. Προεπεξεργασία (π.χ. scaling)
+# 3. Προεπεξεργασία (scaling)
 # ---------------------------
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
@@ -95,7 +94,7 @@ for k, v in metrics.items():
     print(f"{k}: {v:.4f}")
 
 # ---------------------------
-# 6. Γραφική παράσταση πραγματικών vs προβλεπόμενων
+# 6. Γράφημα πραγματικών vs προβλεπόμενων
 # ---------------------------
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -132,7 +131,7 @@ plt.savefig(os.path.join(OUTPUT_DIR, "shap_bar.png"), dpi=200)
 plt.close()
 
 # ---------------------------
-# 8. Αποθήκευση Μοντέλου και αποτελεσμάτων
+# 8. Αποθήκευση Μοντέλου και Αποτελεσμάτων
 # ---------------------------
 joblib.dump(model, os.path.join(OUTPUT_DIR, "xgb_bdi_model.joblib"))
 joblib.dump(scaler, os.path.join(OUTPUT_DIR, "scaler.joblib"))
