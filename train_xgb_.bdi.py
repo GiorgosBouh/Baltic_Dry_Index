@@ -50,10 +50,25 @@ df = pd.read_csv(DATA_PATH, parse_dates=["date"])
 df = df.sort_values("date").reset_index(drop=True)
 
 # ---------------------------
+<<<<<<< ours
 # 2. Ορισμός Χ και y (forecast horizon)
 # ---------------------------
 df["y"] = df[TARGET].shift(-HORIZON)
 df = df.dropna(subset=["y"]).reset_index(drop=True)
+=======
+# 2. Feature engineering (lags/rolling) + στόχος forecast
+# ---------------------------
+# Χρησιμοποιούμε μόνο παρελθοντικές τιμές για lag/rolling ώστε να αποφύγουμε leakage.
+df["BDI_lag1"] = df[TARGET].shift(1)
+df["BDI_lag3"] = df[TARGET].shift(3)
+df["BDI_lag5"] = df[TARGET].shift(5)
+df["BDI_roll3"] = df[TARGET].shift(1).rolling(window=3).mean()
+df["BDI_roll7"] = df[TARGET].shift(1).rolling(window=7).mean()
+df["BDI_today"] = df[TARGET]
+
+df["y"] = df[TARGET].shift(-HORIZON)
+df = df.dropna(subset=["y", "BDI_lag1", "BDI_lag3", "BDI_lag5", "BDI_roll3", "BDI_roll7"]).reset_index(drop=True)
+>>>>>>> theirs
 
 X = df.drop(columns=["date", "BDI", "y"])
 y = df["y"]
