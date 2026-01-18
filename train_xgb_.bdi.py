@@ -13,6 +13,7 @@ import pandas as pd
 import shap
 from xgboost import XGBRegressor
 <<<<<<< ours
+<<<<<<< ours
 from sklearn.metrics import mean_squared_error, mean_absolute_error, r2_score
 from sklearn.preprocessing import StandardScaler
 
@@ -238,6 +239,8 @@ with open(os.path.join(OUTPUT_DIR, "test_metrics.json"), "w") as f:
 
 print("\n✅ Τα αποτελέσματα αποθηκεύτηκαν στον φάκελο:", OUTPUT_DIR)
 =======
+=======
+>>>>>>> theirs
 
 
 @dataclass(frozen=True)
@@ -634,4 +637,7 @@ def main() -> None:
 
 if __name__ == "__main__":
     main()
+<<<<<<< ours
+>>>>>>> theirs
+=======
 >>>>>>> theirs
