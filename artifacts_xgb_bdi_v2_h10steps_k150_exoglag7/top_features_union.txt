@@ -1,0 +1,150 @@
+BDI_lag1
+BDI_lag10
+BDI_lag14
+BDI_lag1_lag10
+BDI_lag1_lag14
+BDI_lag1_lag20
+BDI_lag1_lag30
+BDI_lag1_lag7
+BDI_lag2
+BDI_lag20
+BDI_lag3
+BDI_lag30
+BDI_lag3_lag10
+BDI_lag3_lag14
+BDI_lag3_lag20
+BDI_lag3_lag30
+BDI_lag3_lag7
+BDI_lag5
+BDI_lag5_lag10
+BDI_lag5_lag14
+BDI_lag5_lag20
+BDI_lag5_lag30
+BDI_lag5_lag7
+BDI_lag7
+BDI_roll_max_14
+BDI_roll_max_30
+BDI_roll_max_7
+BDI_roll_mean_14
+BDI_roll_mean_30
+BDI_roll_mean_7
+BDI_roll_min_14
+BDI_roll_min_30
+BDI_roll_min_7
+BDI_roll_std_14
+BDI_roll_std_30
+BDI_roll_std_7
+Bulkcarrier Average Speed - Knots_lag10
+Bulkcarrier Average Speed - Knots_lag14
+Bulkcarrier Average Speed - Knots_lag20
+Bulkcarrier Average Speed - Knots_lag30
+Bulkcarrier Average Speed - Knots_lag7
+Commodity Index_lag10
+Commodity Index_lag14
+Commodity Index_lag20
+Commodity Index_lag30
+Commodity Index_lag7
+Port Call - Number_lag10
+Port Call - Number_lag14
+Port Call - Number_lag1_lag10
+Port Call - Number_lag1_lag14
+Port Call - Number_lag1_lag20
+Port Call - Number_lag1_lag30
+Port Call - Number_lag1_lag7
+Port Call - Number_lag20
+Port Call - Number_lag30
+Port Call - Number_lag3_lag10
+Port Call - Number_lag3_lag14
+Port Call - Number_lag3_lag20
+Port Call - Number_lag3_lag30
+Port Call - Number_lag3_lag7
+Port Call - Number_lag5_lag10
+Port Call - Number_lag5_lag14
+Port Call - Number_lag5_lag20
+Port Call - Number_lag5_lag30
+Port Call - Number_lag5_lag7
+Port Call - Number_lag7
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag10
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag14
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag1_lag10
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag1_lag14
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag1_lag20
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag1_lag30
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag1_lag7
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag20
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag30
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag3_lag10
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag3_lag14
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag3_lag20
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag3_lag30
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag3_lag7
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag5_lag10
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag5_lag14
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag5_lag20
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag5_lag30
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag5_lag7
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag7
+Total Bulkcarrier Panama Canal Transits - DWT million_lag10
+Total Bulkcarrier Panama Canal Transits - DWT million_lag14
+Total Bulkcarrier Panama Canal Transits - DWT million_lag1_lag7
+Total Bulkcarrier Panama Canal Transits - DWT million_lag20
+Total Bulkcarrier Panama Canal Transits - DWT million_lag30
+Total Bulkcarrier Panama Canal Transits - DWT million_lag7
+Total Bulkcarrier Suez Canal Transits - DWT million_lag10
+Total Bulkcarrier Suez Canal Transits - DWT million_lag14
+Total Bulkcarrier Suez Canal Transits - DWT million_lag1_lag10
+Total Bulkcarrier Suez Canal Transits - DWT million_lag1_lag14
+Total Bulkcarrier Suez Canal Transits - DWT million_lag1_lag20
+Total Bulkcarrier Suez Canal Transits - DWT million_lag1_lag30
+Total Bulkcarrier Suez Canal Transits - DWT million_lag1_lag7
+Total Bulkcarrier Suez Canal Transits - DWT million_lag20
+Total Bulkcarrier Suez Canal Transits - DWT million_lag30
+Total Bulkcarrier Suez Canal Transits - DWT million_lag3_lag10
+Total Bulkcarrier Suez Canal Transits - DWT million_lag3_lag14
+Total Bulkcarrier Suez Canal Transits - DWT million_lag3_lag20
+Total Bulkcarrier Suez Canal Transits - DWT million_lag3_lag30
+Total Bulkcarrier Suez Canal Transits - DWT million_lag3_lag7
+Total Bulkcarrier Suez Canal Transits - DWT million_lag5_lag10
+Total Bulkcarrier Suez Canal Transits - DWT million_lag5_lag14
+Total Bulkcarrier Suez Canal Transits - DWT million_lag5_lag20
+Total Bulkcarrier Suez Canal Transits - DWT million_lag5_lag30
+Total Bulkcarrier Suez Canal Transits - DWT million_lag5_lag7
+Total Bulkcarrier Suez Canal Transits - DWT million_lag7
+bdi_t
+daily_policy_index_lag10
+daily_policy_index_lag14
+daily_policy_index_lag20
+daily_policy_index_lag30
+daily_policy_index_lag7
+global_trade_lag10
+global_trade_lag14
+global_trade_lag1_lag10
+global_trade_lag1_lag14
+global_trade_lag1_lag20
+global_trade_lag1_lag30
+global_trade_lag1_lag7
+global_trade_lag20
+global_trade_lag30
+global_trade_lag3_lag10
+global_trade_lag3_lag14
+global_trade_lag3_lag20
+global_trade_lag3_lag30
+global_trade_lag3_lag7
+global_trade_lag5_lag10
+global_trade_lag5_lag14
+global_trade_lag5_lag20
+global_trade_lag5_lag30
+global_trade_lag5_lag7
+global_trade_lag7
+ret1
+ret1_roll_mean_14
+ret1_roll_mean_30
+ret1_roll_mean_7
+ret1_roll_std_14
+ret1_roll_std_30
+ret1_roll_std_7
+sp500_lag10
+sp500_lag14
+sp500_lag20
+sp500_lag30
+sp500_lag7
