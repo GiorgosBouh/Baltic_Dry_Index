@@ -48,84 +48,99 @@ if not os.path.exists(DATA_PATH):
 
 df = pd.read_csv(DATA_PATH)
 
-# Βεβαιώσου ότι υπάρχουν βασικές στήλες
+# Έλεγχος βασικών στηλών
 missing = [c for c in [DATE_COL, TARGET] if c not in df.columns]
 if missing:
     raise ValueError(f"Λείπουν στήλες από το dataset: {missing}. Διαθέσιμες: {list(df.columns)}")
 
 df[DATE_COL] = pd.to_datetime(df[DATE_COL], errors="coerce")
 df = df.dropna(subset=[DATE_COL]).copy()
-
 df = df.sort_values(DATE_COL).reset_index(drop=True)
 
-# Μετατροπή στόχου σε numeric (σε περίπτωση που είναι string)
+# Βεβαιώσου ότι ο στόχος είναι numeric
 df[TARGET] = pd.to_numeric(df[TARGET], errors="coerce")
 df = df.dropna(subset=[TARGET]).reset_index(drop=True)
 
 
 # ---------------------------
-# 2. Feature engineering (lags/rolling) + στόχος forecast
+# 2. Feature engineering (lags/rolling) + στόχος forecast (ΔBDI)
 # ---------------------------
-# Χρησιμοποιούμε μόνο παρελθοντικές τιμές για lag/rolling ώστε να αποφύγουμε leakage.
+# Lag/rolling του BDI (με shift(1) στα rolling για να αποφεύγεται leakage)
 df["BDI_lag1"] = df[TARGET].shift(1)
 df["BDI_lag3"] = df[TARGET].shift(3)
 df["BDI_lag5"] = df[TARGET].shift(5)
 df["BDI_roll3"] = df[TARGET].shift(1).rolling(window=3, min_periods=3).mean()
 df["BDI_roll7"] = df[TARGET].shift(1).rolling(window=7, min_periods=7).mean()
-
-# (Προαιρετικό) κρατάμε και το "σήμερα" ως feature - δεν είναι leakage γιατί προβλέπουμε t+HORIZON
-# αλλά αν το horizon=1 και τα features προέρχονται από την ίδια μέρα, είναι ok μόνο αν
-# οι υπόλοιπες features είναι διαθέσιμες στο τέλος της μέρας. Εδώ το αφήνουμε αλλά μπορείς να το αφαιρέσεις.
 df["BDI_today"] = df[TARGET]
 
-# Στόχος πρόβλεψης: t + HORIZON
-df["y"] = df[TARGET].shift(-HORIZON)
+# Θα κάνουμε lags ΜΟΝΟ για numeric base-features (εκτός date/BDI)
+base_feature_cols = [c for c in df.columns if c not in [DATE_COL, TARGET]]
+numeric_base_cols = df[base_feature_cols].select_dtypes(include=[np.number]).columns.tolist()
 
-# Κράτα μόνο γραμμές με πλήρη features + στόχο
-req_cols = ["y", "BDI_lag1", "BDI_lag3", "BDI_lag5", "BDI_roll3", "BDI_roll7", "BDI_today"]
-df = df.dropna(subset=req_cols).reset_index(drop=True)
+# Μην ξανα-lag-άρεις τα ήδη φτιαγμένα features
+already_bdi_feats = {"BDI_lag1", "BDI_lag3", "BDI_lag5", "BDI_roll3", "BDI_roll7", "BDI_today"}
+
+lagged_feature_cols = []
+for col in numeric_base_cols:
+    if col in already_bdi_feats:
+        continue
+    df[f"{col}_lag1"] = df[col].shift(1)
+    df[f"{col}_lag3"] = df[col].shift(3)
+    lagged_feature_cols.extend([f"{col}_lag1", f"{col}_lag3"])
+
+# Στόχος: ΔBDI = BDI(t+H) - BDI(t)
+df["y"] = df[TARGET].shift(-HORIZON) - df[TARGET]
+
+required_cols = [
+    "y",
+    "BDI_lag1",
+    "BDI_lag3",
+    "BDI_lag5",
+    "BDI_roll3",
+    "BDI_roll7",
+    "BDI_today",
+]
+required_cols.extend(lagged_feature_cols)
+
+df = df.dropna(subset=required_cols).reset_index(drop=True)
 
 # ---------------------------
-# 3. Prepare X, y (μόνο αριθμητικά features)
+# 3. Prepare X, y (μόνο numeric features)
 # ---------------------------
-# Αφαίρεση date/target/y
 X = df.drop(columns=[DATE_COL, TARGET, "y"]).copy()
+X = X.select_dtypes(include=[np.number])  # safety
 y = df["y"].copy()
 
-# Κράτα μόνο numeric columns (για να μην σκάσει ο StandardScaler)
-X = X.select_dtypes(include=[np.number])
-
 if X.shape[1] == 0:
-    raise ValueError("Δεν βρέθηκαν αριθμητικά features μετά το preprocessing. Έλεγξε το dataset.")
+    raise ValueError("Δεν βρέθηκαν numeric features για εκπαίδευση. Έλεγξε το dataset.")
 
-# Χρονικό split (όχι τυχαίο) για αποφυγή leakage
+# Χρονικό split
 split_idx = int(len(df) * (1 - TEST_SIZE))
 if split_idx <= 0 or split_idx >= len(df):
-    raise ValueError("Το TEST_SIZE οδηγεί σε άκυρο split. Ρύθμισε το TEST_SIZE.")
+    raise ValueError("Άκυρο split. Ρύθμισε το TEST_SIZE ή έλεγξε το μέγεθος δεδομένων.")
 
 X_train, X_test = X.iloc[:split_idx], X.iloc[split_idx:]
 y_train, y_test = y.iloc[:split_idx], y.iloc[split_idx:]
-dates_train = df[DATE_COL].iloc[:split_idx]
-dates_test = df[DATE_COL].iloc[split_idx:]
+dates_train, dates_test = df[DATE_COL].iloc[:split_idx], df[DATE_COL].iloc[split_idx:]
 
 print(f"Train: {dates_train.min().date()} → {dates_train.max().date()} ({len(X_train)} δείγματα)")
 print(f"Test : {dates_test.min().date()} → {dates_test.max().date()} ({len(X_test)} δείγματα)")
 
 
 # ---------------------------
-# 4. Προεπεξεργασία (scaling)
+# 4. Scaling
 # ---------------------------
 scaler = StandardScaler()
 X_train_scaled = scaler.fit_transform(X_train)
 X_test_scaled = scaler.transform(X_test)
 
-# Για SHAP/plots: κράτα DataFrames με feature names
+# Κράτα DataFrame εκδοχή για feature names (για SHAP/plots)
 X_train_scaled_df = pd.DataFrame(X_train_scaled, columns=X.columns, index=X_train.index)
 X_test_scaled_df = pd.DataFrame(X_test_scaled, columns=X.columns, index=X_test.index)
 
 
 # ---------------------------
-# 5. XGBoost Εκπαίδευση
+# 5. XGBoost Training
 # ---------------------------
 model = XGBRegressor(
     n_estimators=500,
@@ -135,53 +150,80 @@ model = XGBRegressor(
     colsample_bytree=0.8,
     random_state=RANDOM_STATE,
     n_jobs=-1,
-    verbosity=1
+    verbosity=1,
 )
 
 model.fit(X_train_scaled_df, y_train)
 
 
 # ---------------------------
-# 6. Baseline (Random Walk / Persistence) + Αξιολόγηση
+# 6. Baseline + Αξιολόγηση
 # ---------------------------
-# Baseline: πρόβλεψη y(t+H) = BDI(t)
-# Μετά τα dropna, το df είναι ευθυγραμμισμένο και το "BDI_today" είναι η BDI(t)
-y_pred_rw = df["BDI_today"].iloc[split_idx:split_idx + len(y_test)].to_numpy()
+# Baseline για ΔBDI: persistence στο delta-space => 0 (δηλ. "δεν αλλάζει")
+y_pred_rw_delta = np.zeros_like(y_test.to_numpy())
 
-rw_metrics = {
-    "RMSE": float(rmse(y_test, y_pred_rw)),
-    "MAE": float(mean_absolute_error(y_test, y_pred_rw)),
-    "MAPE": float(mape(y_test, y_pred_rw)),
-    "R2": float(r2_score(y_test, y_pred_rw)),
+rw_metrics_delta = {
+    "RMSE": float(rmse(y_test, y_pred_rw_delta)),
+    "MAE": float(mean_absolute_error(y_test, y_pred_rw_delta)),
+    "MAPE": float(mape(y_test, y_pred_rw_delta)),
+    "R2": float(r2_score(y_test, y_pred_rw_delta)),
 }
 
-print("\nRandom Walk / Persistence (Baseline):")
-for k, v in rw_metrics.items():
+print("\nRandom Walk / Persistence (Baseline) - ΔBDI:")
+for k, v in rw_metrics_delta.items():
     print(f"{k}: {v:.4f}")
 
-# Πρόβλεψη XGBoost
-y_pred = model.predict(X_test_scaled_df)
+# Πρόβλεψη XGBoost για ΔBDI
+y_pred_delta = model.predict(X_test_scaled_df)
 
-metrics = {
-    "RMSE": float(rmse(y_test, y_pred)),
-    "MAE": float(mean_absolute_error(y_test, y_pred)),
-    "MAPE": float(mape(y_test, y_pred)),
-    "R2": float(r2_score(y_test, y_pred)),
+metrics_delta = {
+    "RMSE": float(rmse(y_test, y_pred_delta)),
+    "MAE": float(mean_absolute_error(y_test, y_pred_delta)),
+    "MAPE": float(mape(y_test, y_pred_delta)),
+    "R2": float(r2_score(y_test, y_pred_delta)),
 }
 
-print("\nΑποτελέσματα στο Test Set (XGBoost):")
-for k, v in metrics.items():
+print("\nΑποτελέσματα στο Test Set (XGBoost) - ΔBDI:")
+for k, v in metrics_delta.items():
+    print(f"{k}: {v:.4f}")
+
+# Μετατροπή σε επίπεδο (level): BDI_pred(t+H) = BDI(t) + Δ_pred
+base_level = df[TARGET].iloc[split_idx : split_idx + len(y_test)].to_numpy()
+y_test_level = base_level + y_test.to_numpy()
+y_pred_level = base_level + y_pred_delta
+y_pred_rw_level = base_level  # persistence σε level
+
+rw_metrics_level = {
+    "RMSE": float(rmse(y_test_level, y_pred_rw_level)),
+    "MAE": float(mean_absolute_error(y_test_level, y_pred_rw_level)),
+    "MAPE": float(mape(y_test_level, y_pred_rw_level)),
+    "R2": float(r2_score(y_test_level, y_pred_rw_level)),
+}
+
+metrics_level = {
+    "RMSE": float(rmse(y_test_level, y_pred_level)),
+    "MAE": float(mean_absolute_error(y_test_level, y_pred_level)),
+    "MAPE": float(mape(y_test_level, y_pred_level)),
+    "R2": float(r2_score(y_test_level, y_pred_level)),
+}
+
+print("\nRandom Walk / Persistence (Baseline) - Level:")
+for k, v in rw_metrics_level.items():
+    print(f"{k}: {v:.4f}")
+
+print("\nΑποτελέσματα στο Test Set (XGBoost) - Level:")
+for k, v in metrics_level.items():
     print(f"{k}: {v:.4f}")
 
 
 # ---------------------------
-# 7. Γράφημα πραγματικών vs προβλεπόμενων
+# 7. Plot πραγματικό vs πρόβλεψη (Level)
 # ---------------------------
 os.makedirs(OUTPUT_DIR, exist_ok=True)
 
 plt.figure(figsize=(12, 5))
-plt.plot(dates_test, y_test, label="Πραγματικό BDI", linewidth=2)
-plt.plot(dates_test, y_pred, label="Πρόβλεψη XGBoost", linewidth=2)
+plt.plot(dates_test, y_test_level, label="Πραγματικό BDI", linewidth=2)
+plt.plot(dates_test, y_pred_level, label="Πρόβλεψη XGBoost", linewidth=2)
 plt.xlabel("Ημερομηνία")
 plt.ylabel("BDI")
 plt.title(f"Πρόβλεψη Baltic Dry Index (t+{HORIZON}) με XGBoost")
@@ -195,37 +237,46 @@ plt.close()
 # ---------------------------
 # 8. SHAP Explainability (robust)
 # ---------------------------
-# Για tree models, TreeExplainer είναι πιο σταθερό.
-# Υπολογίζουμε SHAP πάνω στα scaled features με ονόματα στηλών.
+# Προτιμάμε TreeExplainer για XGBoost + κρατάμε feature names.
 try:
     explainer = shap.TreeExplainer(model)
     shap_values = explainer.shap_values(X_test_scaled_df)
 
-    # Beeswarm
     plt.figure()
     shap.summary_plot(shap_values, X_test_scaled_df, show=False)
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "shap_beeswarm.png"), dpi=200)
     plt.close()
 
-    # Bar
     plt.figure()
     shap.summary_plot(shap_values, X_test_scaled_df, show=False, plot_type="bar")
     plt.tight_layout()
     plt.savefig(os.path.join(OUTPUT_DIR, "shap_bar.png"), dpi=200)
     plt.close()
 except Exception as e:
-    print(f"\n⚠️ SHAP απέτυχε να τρέξει: {e}")
-    print("   (Το training/metrics ολοκληρώθηκαν κανονικά. Έλεγξε την έκδοση shap/xgboost αν χρειάζεται.)")
+    print(f"\n⚠️ SHAP απέτυχε: {e}")
+    print("   (Το training/metrics ολοκληρώθηκαν κανονικά.)")
 
 
 # ---------------------------
-# 9. Αποθήκευση Μοντέλου και Αποτελεσμάτων
+# 9. Save artifacts
 # ---------------------------
 joblib.dump(model, os.path.join(OUTPUT_DIR, "xgb_bdi_model.joblib"))
 joblib.dump(scaler, os.path.join(OUTPUT_DIR, "scaler.joblib"))
 
 with open(os.path.join(OUTPUT_DIR, "test_metrics.json"), "w", encoding="utf-8") as f:
-    json.dump({"random_walk": rw_metrics, "xgboost": metrics}, f, indent=2, ensure_ascii=False)
+    json.dump(
+        {
+            "random_walk_delta": rw_metrics_delta,
+            "xgboost_delta": metrics_delta,
+            "random_walk_level": rw_metrics_level,
+            "xgboost_level": metrics_level,
+            "horizon": HORIZON,
+            "test_size": TEST_SIZE,
+        },
+        f,
+        indent=2,
+        ensure_ascii=False,
+    )
 
 print("\n✅ Τα αποτελέσματα αποθηκεύτηκαν στον φάκελο:", OUTPUT_DIR)
