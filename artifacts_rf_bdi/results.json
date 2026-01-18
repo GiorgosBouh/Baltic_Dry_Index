@@ -1,0 +1,26 @@
+{
+  "horizon": 1,
+  "train_start": "2019-01-02",
+  "train_end": "2023-12-19",
+  "test_start": "2023-12-20",
+  "test_end": "2025-04-02",
+  "best_params": {
+    "model__n_estimators": 500,
+    "model__min_samples_split": 2,
+    "model__min_samples_leaf": 8,
+    "model__max_features": 0.7,
+    "model__max_depth": 10
+  },
+  "random_walk": {
+    "rmse": 61.03501788514279,
+    "mae": 42.00749063670412,
+    "mape": 2.63777540895941,
+    "r2": 0.9747409041054415
+  },
+  "test_metrics": {
+    "rmse": 425.3376489417725,
+    "mae": 366.1413841018697,
+    "mape": 24.08775673983224,
+    "r2": -0.22666875040775003
+  }
+}
