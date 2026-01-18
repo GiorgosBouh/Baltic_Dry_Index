@@ -1,0 +1,213 @@
+{
+  "config": {
+    "horizon_days": 10,
+    "n_splits": 5,
+    "test_window": 120,
+    "min_train_size": 365,
+    "step": 120,
+    "val_fraction": 0.15,
+    "purge_gap": 10,
+    "include_current_bdi": true,
+    "strict_feature_filter": true,
+    "use_param_grid": false
+  },
+  "per_split": [
+    {
+      "metrics": {
+        "return": {
+          "RMSE": 0.23153821282536818,
+          "MAE": 0.17992148107327485,
+          "sMAPE": 128.4388338132337,
+          "R2": -0.3194252538502458,
+          "DirectionAcc": 0.5583333333333333
+        },
+        "level": {
+          "RMSE": 361.9788891845841,
+          "MAE": 263.1999697908759,
+          "MAPE": 19.876743616916485,
+          "sMAPE": 17.82941079750583,
+          "R2": 0.4094864379452895
+        }
+      },
+      "baseline_metrics": {
+        "persistence": {
+          "level": {
+            "RMSE": 320.88394838840617,
+            "MAE": 220.70833333333334,
+            "MAPE": 15.379298990133124,
+            "sMAPE": 15.381245516247882,
+            "R2": 0.5359557708835256
+          },
+          "return": {
+            "RMSE": 0.20183373525701326,
+            "MAE": 0.1550338029003344,
+            "sMAPE": 200.0,
+            "R2": -0.00259827687933889,
+            "DirectionAcc": 0.0
+          }
+        },
+        "seasonal_naive": {
+          "level": {
+            "RMSE": 422.7249601004084,
+            "MAE": 301.85135135135135,
+            "MAPE": 20.482273388335035,
+            "sMAPE": 20.66649785902061,
+            "R2": 0.25648916900357255
+          },
+          "return": {
+            "RMSE": 0.2731493525532376,
+            "MAE": 0.20957715034752344,
+            "sMAPE": 156.81413837486858,
+            "R2": -0.8376850546166146,
+            "DirectionAcc": 0.3918918918918919
+          }
+        },
+        "moving_average": {
+          "level": {
+            "RMSE": 361.13643106817705,
+            "MAE": 250.12135922330097,
+            "MAPE": 17.75120323976047,
+            "sMAPE": 17.717043913919728,
+            "R2": 0.42396289962847966
+          },
+          "return": {
+            "RMSE": 0.23137848530326446,
+            "MAE": 0.17894878140034268,
+            "sMAPE": 162.71515012535724,
+            "R2": -0.3113802544073896,
+            "DirectionAcc": 0.4563106796116505
+          }
+        }
+      },
+      "best_params": {
+        "max_depth": 6,
+        "min_child_weight": 1,
+        "subsample": 0.8,
+        "colsample_bytree": 0.8,
+        "reg_alpha": 0.0,
+        "reg_lambda": 1.0
+      }
+    }
+  ],
+  "summary": {
+    "model_return": {
+      "RMSE_mean": 0.23153821282536818,
+      "RMSE_std": 0.0,
+      "MAE_mean": 0.17992148107327485,
+      "MAE_std": 0.0,
+      "sMAPE_mean": 128.4388338132337,
+      "sMAPE_std": 0.0,
+      "R2_mean": -0.3194252538502458,
+      "R2_std": 0.0,
+      "DirectionAcc_mean": 0.5583333333333333,
+      "DirectionAcc_std": 0.0
+    },
+    "model_level": {
+      "RMSE_mean": 361.9788891845841,
+      "RMSE_std": 0.0,
+      "MAE_mean": 263.1999697908759,
+      "MAE_std": 0.0,
+      "MAPE_mean": 19.876743616916485,
+      "MAPE_std": 0.0,
+      "sMAPE_mean": 17.82941079750583,
+      "sMAPE_std": 0.0,
+      "R2_mean": 0.4094864379452895,
+      "R2_std": 0.0
+    },
+    "persistence_return": {
+      "RMSE_mean": 0.20183373525701326,
+      "RMSE_std": 0.0,
+      "MAE_mean": 0.1550338029003344,
+      "MAE_std": 0.0,
+      "sMAPE_mean": 200.0,
+      "sMAPE_std": 0.0,
+      "R2_mean": -0.00259827687933889,
+      "R2_std": 0.0,
+      "DirectionAcc_mean": 0.0,
+      "DirectionAcc_std": 0.0
+    },
+    "persistence_level": {
+      "RMSE_mean": 320.88394838840617,
+      "RMSE_std": 0.0,
+      "MAE_mean": 220.70833333333334,
+      "MAE_std": 0.0,
+      "MAPE_mean": 15.379298990133124,
+      "MAPE_std": 0.0,
+      "sMAPE_mean": 15.381245516247882,
+      "sMAPE_std": 0.0,
+      "R2_mean": 0.5359557708835256,
+      "R2_std": 0.0
+    },
+    "seasonal_naive_return": {
+      "RMSE_mean": 0.2731493525532376,
+      "RMSE_std": 0.0,
+      "MAE_mean": 0.20957715034752344,
+      "MAE_std": 0.0,
+      "sMAPE_mean": 156.81413837486858,
+      "sMAPE_std": 0.0,
+      "R2_mean": -0.8376850546166146,
+      "R2_std": 0.0,
+      "DirectionAcc_mean": 0.3918918918918919,
+      "DirectionAcc_std": 0.0
+    },
+    "seasonal_naive_level": {
+      "RMSE_mean": 422.7249601004084,
+      "RMSE_std": 0.0,
+      "MAE_mean": 301.85135135135135,
+      "MAE_std": 0.0,
+      "MAPE_mean": 20.482273388335035,
+      "MAPE_std": 0.0,
+      "sMAPE_mean": 20.66649785902061,
+      "sMAPE_std": 0.0,
+      "R2_mean": 0.25648916900357255,
+      "R2_std": 0.0
+    },
+    "moving_average_return": {
+      "RMSE_mean": 0.23137848530326446,
+      "RMSE_std": 0.0,
+      "MAE_mean": 0.17894878140034268,
+      "MAE_std": 0.0,
+      "sMAPE_mean": 162.71515012535724,
+      "sMAPE_std": 0.0,
+      "R2_mean": -0.3113802544073896,
+      "R2_std": 0.0,
+      "DirectionAcc_mean": 0.4563106796116505,
+      "DirectionAcc_std": 0.0
+    },
+    "moving_average_level": {
+      "RMSE_mean": 361.13643106817705,
+      "RMSE_std": 0.0,
+      "MAE_mean": 250.12135922330097,
+      "MAE_std": 0.0,
+      "MAPE_mean": 17.75120323976047,
+      "MAPE_std": 0.0,
+      "sMAPE_mean": 17.717043913919728,
+      "sMAPE_std": 0.0,
+      "R2_mean": 0.42396289962847966,
+      "R2_std": 0.0
+    }
+  },
+  "feature_count": 51,
+  "feature_names_head": [
+    "BDI_lag1",
+    "BDI_lag3",
+    "BDI_lag5",
+    "Port Call - Number_lag1",
+    "Port Call - Number_lag3",
+    "Port Call - Number_lag5",
+    "global_trade_lag1",
+    "global_trade_lag3",
+    "global_trade_lag5",
+    "Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag1",
+    "Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag3",
+    "Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag5",
+    "Total Bulkcarrier Suez Canal Transits - DWT million_lag1",
+    "Total Bulkcarrier Suez Canal Transits - DWT million_lag3",
+    "Total Bulkcarrier Suez Canal Transits - DWT million_lag5",
+    "Total Bulkcarrier Panama Canal Transits - DWT million_lag1",
+    "Total Bulkcarrier Panama Canal Transits - DWT million_lag3",
+    "Total Bulkcarrier Panama Canal Transits - DWT million_lag5",
+    "Commodity Index_lag1",
+    "Commodity Index_lag3"
+  ]
+}
