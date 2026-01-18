@@ -29,6 +29,7 @@ def mape(y_true, y_pred):
 # ---------------------------
 DATA_PATH = "Enriched_BDI_Dataset.csv"  # ✅ ΔΙΟΡΘΩΜΕΝΟ
 TARGET = "BDI"
+HORIZON = 1
 OUTPUT_DIR = "artifacts_xgb_bdi"
 TEST_SIZE = 0.2
 RANDOM_STATE = 42
@@ -40,10 +41,13 @@ df = pd.read_csv(DATA_PATH, parse_dates=["date"])
 df = df.sort_values("date").reset_index(drop=True)
 
 # ---------------------------
-# 2. Ορισμός Χ και y
+# 2. Ορισμός Χ και y (forecast horizon)
 # ---------------------------
-X = df.drop(columns=["date", "BDI"])
-y = df[TARGET]
+df["y"] = df[TARGET].shift(-HORIZON)
+df = df.dropna(subset=["y"]).reset_index(drop=True)
+
+X = df.drop(columns=["date", "BDI", "y"])
+y = df["y"]
 
 # Χρονικό split (όχι τυχαίο) για αποφυγή leakage
 split_idx = int(len(df) * (1 - TEST_SIZE))
@@ -103,7 +107,7 @@ plt.plot(dates_test, y_test, label="Πραγματικό BDI", linewidth=2)
 plt.plot(dates_test, y_pred, label="Πρόβλεψη XGBoost", linewidth=2)
 plt.xlabel("Ημερομηνία")
 plt.ylabel("BDI")
-plt.title("Πρόβλεψη Baltic Dry Index με XGBoost")
+plt.title(f"Πρόβλεψη Baltic Dry Index (t+{HORIZON}) με XGBoost")
 plt.grid(True, alpha=0.3)
 plt.legend()
 plt.tight_layout()
