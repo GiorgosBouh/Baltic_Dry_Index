@@ -1,0 +1,64 @@
+Μεταβλητή,Περιγραφή (απλά ελληνικά)
+BDI,Baltic Dry Index – ο δείκτης που θέλουμε να προβλέψουμε
+Port Call - Number,Αυθεντική μεταβλητή: Port Call - Number
+global_trade,Αυθεντική μεταβλητή: global_trade
+Total Bulkcarrier Bosphorus Strait Transits - DWT million,Αυθεντική μεταβλητή: Total Bulkcarrier Bosphorus Strait Transits - DWT million
+Total Bulkcarrier Suez Canal Transits - DWT million,Αυθεντική μεταβλητή: Total Bulkcarrier Suez Canal Transits - DWT million
+Total Bulkcarrier Panama Canal Transits - DWT million,Αυθεντική μεταβλητή: Total Bulkcarrier Panama Canal Transits - DWT million
+Commodity Index,Αυθεντική μεταβλητή: Commodity Index
+Bulkcarrier Average Speed - Knots,Αυθεντική μεταβλητή: Bulkcarrier Average Speed - Knots
+daily_policy_index,Αυθεντική μεταβλητή: daily_policy_index
+sp500,Αυθεντική μεταβλητή: sp500
+BDI_lag1,Η τιμή της μεταβλητής BDI πριν από 1 μέρες
+BDI_lag3,Η τιμή της μεταβλητής BDI πριν από 3 μέρες
+BDI_lag5,Η τιμή της μεταβλητής BDI πριν από 5 μέρες
+Port Call - Number_lag1,Η τιμή της μεταβλητής Port Call - Number πριν από 1 μέρες
+Port Call - Number_lag3,Η τιμή της μεταβλητής Port Call - Number πριν από 3 μέρες
+Port Call - Number_lag5,Η τιμή της μεταβλητής Port Call - Number πριν από 5 μέρες
+global_trade_lag1,Η τιμή της μεταβλητής global_trade πριν από 1 μέρες
+global_trade_lag3,Η τιμή της μεταβλητής global_trade πριν από 3 μέρες
+global_trade_lag5,Η τιμή της μεταβλητής global_trade πριν από 5 μέρες
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag1,Η τιμή της μεταβλητής Total Bulkcarrier Bosphorus Strait Transits - DWT million πριν από 1 μέρες
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag3,Η τιμή της μεταβλητής Total Bulkcarrier Bosphorus Strait Transits - DWT million πριν από 3 μέρες
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag5,Η τιμή της μεταβλητής Total Bulkcarrier Bosphorus Strait Transits - DWT million πριν από 5 μέρες
+Total Bulkcarrier Suez Canal Transits - DWT million_lag1,Η τιμή της μεταβλητής Total Bulkcarrier Suez Canal Transits - DWT million πριν από 1 μέρες
+Total Bulkcarrier Suez Canal Transits - DWT million_lag3,Η τιμή της μεταβλητής Total Bulkcarrier Suez Canal Transits - DWT million πριν από 3 μέρες
+Total Bulkcarrier Suez Canal Transits - DWT million_lag5,Η τιμή της μεταβλητής Total Bulkcarrier Suez Canal Transits - DWT million πριν από 5 μέρες
+Total Bulkcarrier Panama Canal Transits - DWT million_lag1,Η τιμή της μεταβλητής Total Bulkcarrier Panama Canal Transits - DWT million πριν από 1 μέρες
+Total Bulkcarrier Panama Canal Transits - DWT million_lag3,Η τιμή της μεταβλητής Total Bulkcarrier Panama Canal Transits - DWT million πριν από 3 μέρες
+Total Bulkcarrier Panama Canal Transits - DWT million_lag5,Η τιμή της μεταβλητής Total Bulkcarrier Panama Canal Transits - DWT million πριν από 5 μέρες
+Commodity Index_lag1,Η τιμή της μεταβλητής Commodity Index πριν από 1 μέρες
+Commodity Index_lag3,Η τιμή της μεταβλητής Commodity Index πριν από 3 μέρες
+Commodity Index_lag5,Η τιμή της μεταβλητής Commodity Index πριν από 5 μέρες
+Bulkcarrier Average Speed - Knots_lag1,Η τιμή της μεταβλητής Bulkcarrier Average Speed - Knots πριν από 1 μέρες
+Bulkcarrier Average Speed - Knots_lag3,Η τιμή της μεταβλητής Bulkcarrier Average Speed - Knots πριν από 3 μέρες
+Bulkcarrier Average Speed - Knots_lag5,Η τιμή της μεταβλητής Bulkcarrier Average Speed - Knots πριν από 5 μέρες
+daily_policy_index_lag1,Η τιμή της μεταβλητής daily_policy_index πριν από 1 μέρες
+daily_policy_index_lag3,Η τιμή της μεταβλητής daily_policy_index πριν από 3 μέρες
+daily_policy_index_lag5,Η τιμή της μεταβλητής daily_policy_index πριν από 5 μέρες
+sp500_lag1,Η τιμή της μεταβλητής sp500 πριν από 1 μέρες
+sp500_lag3,Η τιμή της μεταβλητής sp500 πριν από 3 μέρες
+sp500_lag5,Η τιμή της μεταβλητής sp500 πριν από 5 μέρες
+BDI_roll3,Μέσος όρος της BDI τις τελευταίες 3 μέρες
+BDI_roll7,Μέσος όρος της BDI τις τελευταίες 7 μέρες
+Port Call - Number_roll3,Μέσος όρος της Port Call - Number τις τελευταίες 3 μέρες
+Port Call - Number_roll7,Μέσος όρος της Port Call - Number τις τελευταίες 7 μέρες
+global_trade_roll3,Μέσος όρος της global_trade τις τελευταίες 3 μέρες
+global_trade_roll7,Μέσος όρος της global_trade τις τελευταίες 7 μέρες
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_roll3,Μέσος όρος της Total Bulkcarrier Bosphorus Strait Transits - DWT million τις τελευταίες 3 μέρες
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_roll7,Μέσος όρος της Total Bulkcarrier Bosphorus Strait Transits - DWT million τις τελευταίες 7 μέρες
+Total Bulkcarrier Suez Canal Transits - DWT million_roll3,Μέσος όρος της Total Bulkcarrier Suez Canal Transits - DWT million τις τελευταίες 3 μέρες
+Total Bulkcarrier Suez Canal Transits - DWT million_roll7,Μέσος όρος της Total Bulkcarrier Suez Canal Transits - DWT million τις τελευταίες 7 μέρες
+Total Bulkcarrier Panama Canal Transits - DWT million_roll3,Μέσος όρος της Total Bulkcarrier Panama Canal Transits - DWT million τις τελευταίες 3 μέρες
+Total Bulkcarrier Panama Canal Transits - DWT million_roll7,Μέσος όρος της Total Bulkcarrier Panama Canal Transits - DWT million τις τελευταίες 7 μέρες
+Commodity Index_roll3,Μέσος όρος της Commodity Index τις τελευταίες 3 μέρες
+Commodity Index_roll7,Μέσος όρος της Commodity Index τις τελευταίες 7 μέρες
+Bulkcarrier Average Speed - Knots_roll3,Μέσος όρος της Bulkcarrier Average Speed - Knots τις τελευταίες 3 μέρες
+Bulkcarrier Average Speed - Knots_roll7,Μέσος όρος της Bulkcarrier Average Speed - Knots τις τελευταίες 7 μέρες
+daily_policy_index_roll3,Μέσος όρος της daily_policy_index τις τελευταίες 3 μέρες
+daily_policy_index_roll7,Μέσος όρος της daily_policy_index τις τελευταίες 7 μέρες
+sp500_roll3,Μέσος όρος της sp500 τις τελευταίες 3 μέρες
+sp500_roll7,Μέσος όρος της sp500 τις τελευταίες 7 μέρες
+dayofweek,Ποια μέρα της εβδομάδας είναι (0 = Δευτέρα)
+month,Ο μήνας της ημερομηνίας
+quarter,Το τρίμηνο της ημερομηνίας
