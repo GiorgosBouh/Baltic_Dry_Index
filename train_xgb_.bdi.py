@@ -2,13 +2,25 @@
 # -*- coding: utf-8 -*-
 
 """
-BDI forecasting (H = horizon_steps ahead, STEP-BASED) with:
-✅ Strong baselines (persistence / seasonal / moving avg)
-✅ Residual learning vs persistence (model predicts delta over baseline)
-✅ Rich time-series features (lags + rolling mean/std + return momentum/volatility)
-✅ Walk-forward CV with purge gap (reduces leakage overlap)
-✅ Robust objective (pseudohuber) to reduce blow-ups in regime shifts
-✅ Artifacts: predictions CSV, plots, SHAP, metrics JSON
+BDI forecasting (STEP-BASED horizon) — v2
+Goal: REAL forecasting signal (beat persistence), not just "copy baseline".
+
+What this version adds:
+✅ Residual learning vs persistence: predict delta = BDI(t+H) - BDI(t)
+✅ Strong time-series features from BDI (lags/roll/volatility)
+✅ Exogenous features only as LAGS (NO exogenous rolling to avoid feature explosion)
+✅ Production realism: min_exog_lag (simulate reporting delay)
+✅ Two-stage feature selection:
+   - Stage A: fit model on train, rank features by gain
+   - Stage B: retrain using only top-K features
+✅ Walk-forward CV with purge gap
+✅ Clear reporting: improvement over persistence per split + summary
+✅ Artifacts: predictions CSV, plots, metrics JSON, top_features.txt, SHAP
+
+Run:
+  python train_xgb_.bdi.py
+
+If you want more "production realism", set min_exog_lag=7 or 14 in Config.
 """
 
 import json
@@ -44,22 +56,26 @@ class Config:
     val_fraction: float = 0.15
     random_state: int = 42
 
-    # Purge gap (steps) to reduce overlap leakage for multi-step
+    # Purge gap (steps) to reduce leakage overlap for multi-step
     purge_gap: int = -1  # if -1 => horizon_steps
 
     # Feature engineering
-    lags: Tuple[int, ...] = (1, 2, 3, 5, 7, 10, 14, 20, 30, 60)
+    # Keep it compact. Too many features = overfit & no edge.
+    lags: Tuple[int, ...] = (1, 2, 3, 5, 7, 10, 14, 20, 30)
     roll_windows: Tuple[int, ...] = (7, 14, 30)
 
-    # Exogenous availability safeguard (optional):
-    # if you suspect exogenous are published with delay, set to 7 or 14 etc.
-    min_exog_lag: int = 1
+    # Production realism for exogenous features (publication delay)
+    # Recommended runs: 1 (optimistic), 7 (weekly delay), 14 (biweekly)
+    min_exog_lag: int = 7
 
-    # Model
+    # Two-stage selection
+    top_k_features: int = 150
+
+    # Model search
     use_param_grid: bool = False
 
     # Output
-    output_dir_template: str = "artifacts_xgb_bdi_residual_h{h}steps"
+    output_dir_template: str = "artifacts_xgb_bdi_v2_h{h}steps_k{k}_exoglag{elag}"
 
 
 # =========================
@@ -116,6 +132,7 @@ def evaluate_level_metrics(y_true_level, y_pred_level) -> Dict[str, float]:
 
 
 def evaluate_return_metrics(y_true_return, y_pred_return) -> Dict[str, float]:
+    # sMAPE on returns can be unstable (returns near 0); keep it but do not over-interpret
     return {
         "RMSE": rmse(y_true_return, y_pred_return),
         "MAE": mae(y_true_return, y_pred_return),
@@ -140,6 +157,16 @@ def load_data(path: str, date_col: str) -> pd.DataFrame:
     return df
 
 
+def _to_numeric_df(df: pd.DataFrame, exclude: List[str]) -> pd.DataFrame:
+    out = df.copy()
+    for c in out.columns:
+        if c in exclude:
+            continue
+        if out[c].dtype == object:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+    return out
+
+
 # =========================
 # Baselines (STEP-BASED)
 # =========================
@@ -150,7 +177,7 @@ def compute_step_baselines(
     ma_window_steps: int = 7,
 ) -> Dict[str, Dict[str, np.ndarray]]:
     """
-    Baselines predict LEVEL at t+H, compared against y_level which is BDI_{t+H}.
+    Baselines predict LEVEL at t+H, compared against y_level = BDI_{t+H}.
 
     persistence_level(t) = BDI(t)
     seasonal_level(t) = BDI(t - seasonal_lag_steps)
@@ -191,19 +218,9 @@ def compute_step_baselines(
 
 
 # =========================
-# Feature Engineering (better + no fragmentation)
+# Feature Engineering (compact)
 # =========================
-def _to_numeric_df(df: pd.DataFrame, exclude: List[str]) -> pd.DataFrame:
-    out = df.copy()
-    for c in out.columns:
-        if c in exclude:
-            continue
-        if out[c].dtype == object:
-            out[c] = pd.to_numeric(out[c], errors="coerce")
-    return out
-
-
-def build_features_and_targets(df_raw: pd.DataFrame, cfg: Config) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+def build_features_and_targets(df_raw: pd.DataFrame, cfg: Config):
     """
     Returns:
       X (features at time t),
@@ -220,19 +237,17 @@ def build_features_and_targets(df_raw: pd.DataFrame, cfg: Config) -> Tuple[pd.Da
     df[cfg.target_col] = pd.to_numeric(df[cfg.target_col], errors="coerce")
     df = df.dropna(subset=[cfg.target_col]).reset_index(drop=True)
 
-    # --- Targets (STEP-based) ---
+    # Targets (STEP-based)
     bdi_t = df[cfg.target_col].astype(float)
     bdi_future = df[cfg.target_col].shift(-cfg.horizon_steps).astype(float)
     dates = df[cfg.date_col].to_numpy()
 
-    # keep rows where future exists
     keep = bdi_future.notna().to_numpy()
     df = df.loc[keep].reset_index(drop=True)
     bdi_t = bdi_t.loc[keep].reset_index(drop=True).to_numpy(dtype=float)
     bdi_future = bdi_future.loc[keep].reset_index(drop=True).to_numpy(dtype=float)
     dates = dates[: len(df)]
 
-    # log-return target (needs positive)
     eps = 1e-8
     pos_mask = (bdi_t > 0) & (bdi_future > 0)
     df = df.loc[pos_mask].reset_index(drop=True)
@@ -243,40 +258,35 @@ def build_features_and_targets(df_raw: pd.DataFrame, cfg: Config) -> Tuple[pd.Da
     y_level = bdi_future
     y_return = np.log(np.maximum(bdi_future, eps)) - np.log(np.maximum(bdi_t, eps))
 
-    # --- Feature candidates ---
-    # Use all numeric columns except target itself; we will construct lags/rollings.
+    # Feature candidates: all numeric except target; exogenous will be lagged only
     numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-    base_cols = [c for c in numeric_cols if c != cfg.target_col]
+    exog_cols = [c for c in numeric_cols if c != cfg.target_col]
 
-    # Separate exogenous from target-derived features
-    # We will ALWAYS build strong target-derived features, plus exogenous lags (with min_exog_lag).
     features = {}
 
-    # 1) Baseline feature explicitly (helps residual learning)
-    features["bdi_t"] = pd.Series(bdi_t)
-
-    # 2) Target-derived lags (BDI)
+    # Baseline feature (explicit)
     bdi_series = pd.Series(bdi_t)
+    features["bdi_t"] = bdi_series
+
+    # BDI lags
     for L in cfg.lags:
         features[f"BDI_lag{L}"] = bdi_series.shift(L)
 
-    # 3) 1-step log return series (for momentum/volatility)
+    # 1-step log return (momentum & vol)
     r1 = np.log(np.maximum(bdi_series, eps)).diff(1)
     features["ret1"] = r1
     for w in cfg.roll_windows:
         features[f"ret1_roll_mean_{w}"] = r1.shift(1).rolling(w).mean()
         features[f"ret1_roll_std_{w}"] = r1.shift(1).rolling(w).std()
 
-    # 4) BDI rolling stats (level)
+    # BDI rolling stats (level)
     for w in cfg.roll_windows:
         features[f"BDI_roll_mean_{w}"] = bdi_series.shift(1).rolling(w).mean()
         features[f"BDI_roll_std_{w}"] = bdi_series.shift(1).rolling(w).std()
         features[f"BDI_roll_min_{w}"] = bdi_series.shift(1).rolling(w).min()
         features[f"BDI_roll_max_{w}"] = bdi_series.shift(1).rolling(w).max()
 
-    # 5) Exogenous lags (all other numeric predictors)
-    # IMPORTANT: use at least min_exog_lag to simulate publication delay if needed
-    exog_cols = [c for c in base_cols if c != cfg.target_col]
+    # Exogenous lags ONLY (no rolling) to prevent feature explosion
     for col in exog_cols:
         s = pd.Series(df[col].to_numpy(dtype=float))
         for L in cfg.lags:
@@ -284,16 +294,9 @@ def build_features_and_targets(df_raw: pd.DataFrame, cfg: Config) -> Tuple[pd.Da
                 continue
             features[f"{col}_lag{L}"] = s.shift(L)
 
-        # optional rolling on exog (can help)
-        for w in cfg.roll_windows:
-            # rolling on past only
-            features[f"{col}_roll_mean_{w}"] = s.shift(1).rolling(w).mean()
-            features[f"{col}_roll_std_{w}"] = s.shift(1).rolling(w).std()
-
-    # Build X in one shot (avoids fragmentation)
     X = pd.DataFrame(features)
 
-    # Remove rows with any NaN in X
+    # Drop rows with NaN
     mask = np.isfinite(X.to_numpy(dtype=float)).all(axis=1)
     X = X.loc[mask].reset_index(drop=True)
     y_level = y_level[mask]
@@ -337,7 +340,52 @@ def walk_forward_splits(
 
 
 # =========================
-# Train / Eval (Residual Learning)
+# Model factory + feature selection
+# =========================
+def make_model(cfg: Config, params: Dict[str, object]) -> XGBRegressor:
+    return XGBRegressor(
+        n_estimators=6000,
+        learning_rate=0.02,
+        objective="reg:pseudohubererror",  # robust
+        random_state=cfg.random_state,
+        n_jobs=-1,
+        eval_metric="rmse",
+        early_stopping_rounds=250,
+        **params,
+    )
+
+
+def get_param_grid(cfg: Config) -> List[Dict[str, object]]:
+    grid = [
+        {"max_depth": 4, "min_child_weight": 5, "subsample": 0.9, "colsample_bytree": 0.9, "reg_alpha": 0.2, "reg_lambda": 2.0},
+        {"max_depth": 6, "min_child_weight": 3, "subsample": 0.8, "colsample_bytree": 0.8, "reg_alpha": 0.1, "reg_lambda": 2.0},
+        {"max_depth": 8, "min_child_weight": 2, "subsample": 0.7, "colsample_bytree": 0.7, "reg_alpha": 0.0, "reg_lambda": 3.0},
+    ]
+    if not cfg.use_param_grid:
+        return [grid[1]]
+    return grid
+
+
+def select_top_k_features_by_gain(model: XGBRegressor, feature_names: List[str], k: int) -> List[str]:
+    booster = model.get_booster()
+    score = booster.get_score(importance_type="gain")  # dict: f0->gain, etc.
+
+    # Map f{idx} to feature name
+    gains = []
+    for i, name in enumerate(feature_names):
+        key = f"f{i}"
+        gains.append((name, float(score.get(key, 0.0))))
+    gains.sort(key=lambda x: x[1], reverse=True)
+
+    top = [n for n, g in gains[:k] if g > 0]
+    # If all gains are 0 (rare), fallback to first k
+    if not top:
+        top = feature_names[:k]
+    return top
+
+
+# =========================
+# Train / Eval split (2-stage selection)
 # =========================
 def train_eval_one_split(
     X: pd.DataFrame,
@@ -349,18 +397,16 @@ def train_eval_one_split(
     test_idx: np.ndarray,
     cfg: Config,
 ) -> Dict[str, object]:
-    # Baseline for this split (persistence)
+    # Baseline (persistence)
     base_pred_level_test = bdi_t_all[test_idx].astype(float)
 
-    # Residual target: delta over persistence at horizon
-    #   delta_level = BDI(t+H) - BDI(t)
+    # Residual target: delta over persistence
     y_delta = y_level - bdi_t_all
 
-    # Train / test
     X_train_full = X.iloc[train_idx]
-    y_train_full = y_delta[train_idx]  # residual target
+    y_train_full = y_delta[train_idx]
 
-    X_test = X.iloc[test_idx]
+    X_test_full = X.iloc[test_idx]
     y_test_level = y_level[test_idx]
     y_test_return = y_return[test_idx]
     dates_test = dates[test_idx]
@@ -373,78 +419,92 @@ def train_eval_one_split(
     X_val = X_train_full.iloc[-val_size:]
     y_val = y_train_full[-val_size:]
 
-    # Param grid (optional)
-    param_grid = [
-        {"max_depth": 6, "min_child_weight": 1, "subsample": 0.8, "colsample_bytree": 0.8, "reg_alpha": 0.0, "reg_lambda": 1.0},
-        {"max_depth": 4, "min_child_weight": 5, "subsample": 0.9, "colsample_bytree": 0.9, "reg_alpha": 0.1, "reg_lambda": 1.0},
-        {"max_depth": 8, "min_child_weight": 3, "subsample": 0.7, "colsample_bytree": 0.7, "reg_alpha": 0.0, "reg_lambda": 2.0},
-    ]
-    if not cfg.use_param_grid:
-        param_grid = [param_grid[0]]
-
-    best_model = None
+    # ---- Stage A: fit model for feature ranking ----
+    best_stageA = None
     best_score = float("inf")
     best_params = None
 
-    for params in param_grid:
-        # Robust objective helps in regime shifts (less blow-ups than square error)
-        model = XGBRegressor(
-            n_estimators=5000,
-            learning_rate=0.02,
-            objective="reg:pseudohubererror",
-            random_state=cfg.random_state,
-            n_jobs=-1,
-            eval_metric="rmse",
-            early_stopping_rounds=200,
-            **params,
-        )
-        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
-
-        val_pred = model.predict(X_val)
-        val_rmse = rmse(y_val, val_pred)
-        if val_rmse < best_score:
-            best_score = val_rmse
-            best_model = model
+    for params in get_param_grid(cfg):
+        m = make_model(cfg, params)
+        m.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+        pred_val = m.predict(X_val)
+        score_rmse = rmse(y_val, pred_val)
+        if score_rmse < best_score:
+            best_score = score_rmse
+            best_stageA = m
             best_params = params
 
+    # Rank features
+    feature_names = X_train_full.columns.tolist()
+    top_feats = select_top_k_features_by_gain(best_stageA, feature_names, cfg.top_k_features)
+
+    # ---- Stage B: retrain on top-K features only ----
+    X_train_full_k = X_train_full[top_feats]
+    X_test_k = X_test_full[top_feats]
+
+    # Recreate train/val on top feats
+    X_train_k = X_train_full_k.iloc[:-val_size]
+    X_val_k = X_train_full_k.iloc[-val_size:]
+
+    best_model = None
+    best_score_B = float("inf")
+
+    for params in get_param_grid(cfg):
+        m = make_model(cfg, params)
+        m.fit(X_train_k, y_train, eval_set=[(X_val_k, y_val)], verbose=False)
+        pred_val = m.predict(X_val_k)
+        score_rmse = rmse(y_val, pred_val)
+        if score_rmse < best_score_B:
+            best_score_B = score_rmse
+            best_model = m
+
     # Predict residual delta and reconstruct level forecast
-    delta_pred = best_model.predict(X_test)
+    delta_pred = best_model.predict(X_test_k)
     y_pred_level = base_pred_level_test + delta_pred
 
-    # Implied returns for evaluation
+    # returns
     eps = 1e-8
     y_pred_return = np.log(np.maximum(y_pred_level, eps)) - np.log(np.maximum(bdi_origin_test, eps))
 
-    # Metrics model
+    # model metrics
     model_metrics_level = evaluate_level_metrics(y_test_level, y_pred_level)
     model_metrics_return = evaluate_return_metrics(y_test_return, y_pred_return)
 
-    # Baselines
+    # baselines
     baselines = compute_step_baselines(bdi_t_all, test_idx, seasonal_lag_steps=7, ma_window_steps=7)
     baseline_metrics = {}
     for name, preds in baselines.items():
         lvl = preds["level"]
         m_lvl = np.isfinite(lvl)
-        baseline_metrics[name] = {
-            "level": evaluate_level_metrics(y_test_level[m_lvl], lvl[m_lvl]),
-        }
         ret = preds["return"]
         m_ret = np.isfinite(ret)
-        baseline_metrics[name]["return"] = evaluate_return_metrics(y_test_return[m_ret], ret[m_ret])
+        baseline_metrics[name] = {
+            "level": evaluate_level_metrics(y_test_level[m_lvl], lvl[m_lvl]),
+            "return": evaluate_return_metrics(y_test_return[m_ret], ret[m_ret]),
+        }
+
+    # Improvement vs persistence (level RMSE)
+    pers_rmse = baseline_metrics["persistence"]["level"]["RMSE"]
+    imp_rmse = pers_rmse - model_metrics_level["RMSE"]  # positive = improvement
 
     return {
         "model": best_model,
         "best_params": best_params,
+        "top_features": top_feats,
+        "imp_vs_persistence_rmse": imp_rmse,
+
         "dates_test": dates_test,
         "bdi_origin_test": bdi_origin_test,
         "y_true_level": y_test_level,
         "y_pred_level": y_pred_level,
         "y_true_return": y_test_return,
         "y_pred_return": y_pred_return,
+
         "baselines": baselines,
         "metrics": {"level": model_metrics_level, "return": model_metrics_return},
         "baseline_metrics": baseline_metrics,
-        "X_test": X_test,
+
+        "X_test_k": X_test_k,
         "base_pred_level_test": base_pred_level_test,
     }
 
@@ -467,6 +527,8 @@ def aggregate_results(split_results: List[Dict[str, object]]) -> Dict[str, Dict[
     summary = {
         "model_level": summarize(model_level),
         "model_return": summarize(model_return),
+        "imp_vs_persistence_rmse_mean": float(np.mean([r["imp_vs_persistence_rmse"] for r in split_results])),
+        "imp_vs_persistence_rmse_std": float(np.std([r["imp_vs_persistence_rmse"] for r in split_results], ddof=1)) if len(split_results) > 1 else 0.0,
     }
 
     baseline_names = list(split_results[0]["baseline_metrics"].keys())
@@ -484,13 +546,25 @@ def save_artifacts(
     final_result: Dict[str, object],
     split_results: List[Dict[str, object]],
     summary: Dict[str, Dict[str, float]],
-    feature_names: List[str],
     cfg: Config,
 ) -> None:
     os.makedirs(outdir, exist_ok=True)
 
-    # model
+    # Save final model
     joblib.dump(final_result["model"], os.path.join(outdir, "xgb_bdi_model.joblib"))
+
+    # Save top features used (final split)
+    with open(os.path.join(outdir, "top_features_last_split.txt"), "w") as f:
+        for name in final_result["top_features"]:
+            f.write(name + "\n")
+
+    # Save union of top features across splits (for stability check)
+    union = set()
+    for res in split_results:
+        union.update(res["top_features"])
+    with open(os.path.join(outdir, "top_features_union.txt"), "w") as f:
+        for name in sorted(union):
+            f.write(name + "\n")
 
     # predictions CSV (final window)
     pred_df = pd.DataFrame(
@@ -512,7 +586,7 @@ def save_artifacts(
     dates = pd.to_datetime(final_result["dates_test"])
     plt.figure(figsize=(12, 5))
     plt.plot(dates, final_result["y_true_level"], label="Actual BDI(t+H)", linewidth=2)
-    plt.plot(dates, final_result["y_pred_level"], label="XGB (residual over persistence)", linewidth=2)
+    plt.plot(dates, final_result["y_pred_level"], label="XGB v2 (residual + top-K)", linewidth=2)
     plt.plot(dates, final_result["base_pred_level_test"], label="Persistence", linewidth=1.5, alpha=0.8)
     plt.title(f"BDI Forecast (H={cfg.horizon_steps} steps) — Final Window")
     plt.xlabel("Origin date t")
@@ -523,19 +597,19 @@ def save_artifacts(
     plt.savefig(os.path.join(outdir, "actual_vs_pred_final.png"), dpi=200)
     plt.close()
 
-    # SHAP
+    # SHAP on top-K features (final split)
     try:
         explainer = shap.TreeExplainer(final_result["model"])
-        shap_values = explainer.shap_values(final_result["X_test"])
+        shap_values = explainer.shap_values(final_result["X_test_k"])
 
         plt.figure()
-        shap.summary_plot(shap_values, final_result["X_test"], show=False)
+        shap.summary_plot(shap_values, final_result["X_test_k"], show=False)
         plt.tight_layout()
         plt.savefig(os.path.join(outdir, "shap_beeswarm.png"), dpi=200)
         plt.close()
 
         plt.figure()
-        shap.summary_plot(shap_values, final_result["X_test"], show=False, plot_type="bar")
+        shap.summary_plot(shap_values, final_result["X_test_k"], show=False, plot_type="bar")
         plt.tight_layout()
         plt.savefig(os.path.join(outdir, "shap_bar.png"), dpi=200)
         plt.close()
@@ -558,21 +632,24 @@ def save_artifacts(
                     "lags": list(cfg.lags),
                     "roll_windows": list(cfg.roll_windows),
                     "min_exog_lag": cfg.min_exog_lag,
+                    "top_k_features": cfg.top_k_features,
                     "use_param_grid": cfg.use_param_grid,
                     "objective": "reg:pseudohubererror",
                     "residual_learning": "delta_level = y_level - persistence",
+                    "feature_selection": "two-stage gain-based top-K per split",
                 },
                 "per_split": [
                     {
+                        "imp_vs_persistence_rmse": res["imp_vs_persistence_rmse"],
                         "metrics": res["metrics"],
                         "baseline_metrics": res["baseline_metrics"],
                         "best_params": res["best_params"],
+                        "top_features_head": res["top_features"][:30],
+                        "top_features_count": len(res["top_features"]),
                     }
                     for res in split_results
                 ],
                 "summary": summary,
-                "feature_count": len(feature_names),
-                "feature_names_head": feature_names[:30],
             },
             f,
             indent=2,
@@ -585,17 +662,18 @@ def save_artifacts(
 def main() -> None:
     cfg = Config()
     purge_gap = cfg.horizon_steps if cfg.purge_gap == -1 else cfg.purge_gap
-    outdir = cfg.output_dir_template.format(h=cfg.horizon_steps)
+
+    outdir = cfg.output_dir_template.format(h=cfg.horizon_steps, k=cfg.top_k_features, elag=cfg.min_exog_lag)
 
     df_raw = load_data(cfg.data_path, cfg.date_col)
 
-    # Build features + targets (this is the big improvement)
+    # Build features + targets
     X, y_level, y_return, dates, bdi_t_all = build_features_and_targets(df_raw, cfg)
-    feature_names = X.columns.tolist()
 
-    print(f"Rows: {len(X)}, Features: {len(feature_names)}")
+    print(f"Rows: {len(X)}, Features: {X.shape[1]}")
     print(f"Origin date range: {pd.to_datetime(dates).min().date()} → {pd.to_datetime(dates).max().date()}")
-    print("Feature sample:", feature_names[:15])
+    print("Feature sample:", X.columns[:15].tolist())
+    print(f"Using min_exog_lag={cfg.min_exog_lag}, top_k_features={cfg.top_k_features}")
 
     splits = walk_forward_splits(
         n_samples=len(X),
@@ -625,6 +703,7 @@ def main() -> None:
         print("Model metrics (LEVEL): ", res["metrics"]["level"])
         print("Model metrics (RETURN):", res["metrics"]["return"])
 
+        # compact baselines
         compact = {}
         for bname, bm in res["baseline_metrics"].items():
             compact[bname] = {
@@ -634,16 +713,21 @@ def main() -> None:
             }
         print("Baselines (compact):", compact)
 
+        imp = res["imp_vs_persistence_rmse"]
+        print(f"Improvement vs Persistence (LEVEL RMSE): {imp:+.4f}  (positive is better)")
+
     summary = aggregate_results(split_results)
     final_result = split_results[-1]
 
-    save_artifacts(outdir, final_result, split_results, summary, feature_names, cfg)
+    save_artifacts(outdir, final_result, split_results, summary, cfg)
 
     print(f"\n✅ Artifacts saved to: {outdir}")
-    print("\nSummary (model level RMSE mean/std):",
+    print("\nSummary (model LEVEL RMSE mean/std):",
           summary["model_level"]["RMSE_mean"], summary["model_level"]["RMSE_std"])
-    print("Summary (model return DirectionAcc mean/std):",
+    print("Summary (model RETURN DirectionAcc mean/std):",
           summary["model_return"]["DirectionAcc_mean"], summary["model_return"]["DirectionAcc_std"])
+    print("Summary improvement vs persistence (LEVEL RMSE mean/std):",
+          summary["imp_vs_persistence_rmse_mean"], summary["imp_vs_persistence_rmse_std"])
 
 
 if __name__ == "__main__":
