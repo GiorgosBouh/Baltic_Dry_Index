@@ -1,6 +1,16 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 
+"""
+BDI forecasting (H = horizon_steps ahead, STEP-BASED) with:
+✅ Strong baselines (persistence / seasonal / moving avg)
+✅ Residual learning vs persistence (model predicts delta over baseline)
+✅ Rich time-series features (lags + rolling mean/std + return momentum/volatility)
+✅ Walk-forward CV with purge gap (reduces leakage overlap)
+✅ Robust objective (pseudohuber) to reduce blow-ups in regime shifts
+✅ Artifacts: predictions CSV, plots, SHAP, metrics JSON
+"""
+
 import json
 import os
 from dataclasses import dataclass
@@ -23,29 +33,33 @@ class Config:
     target_col: str = "BDI"
     date_col: str = "date"
 
-    # Horizon as BUSINESS/TRADING STEPS (rows)
+    # Forecast horizon as steps (rows)
     horizon_steps: int = 10
 
     # Walk-forward evaluation
     n_splits: int = 5
-    test_window: int = 120           # number of origin points (rows) per test window
+    test_window: int = 120
     min_train_size: int = 365
     step: int = 120
     val_fraction: float = 0.15
     random_state: int = 42
 
-    # Purge gap to reduce leakage overlap for multi-step (in steps)
-    purge_gap: int = -1              # if -1 => use horizon_steps
+    # Purge gap (steps) to reduce overlap leakage for multi-step
+    purge_gap: int = -1  # if -1 => horizon_steps
 
-    # Feature selection
-    include_current_bdi: bool = True  # allow BDI(t) as feature at origin
-    strict_feature_filter: bool = True  # keep only lag/roll-like features (+ optional current BDI)
+    # Feature engineering
+    lags: Tuple[int, ...] = (1, 2, 3, 5, 7, 10, 14, 20, 30, 60)
+    roll_windows: Tuple[int, ...] = (7, 14, 30)
 
-    # Model selection
+    # Exogenous availability safeguard (optional):
+    # if you suspect exogenous are published with delay, set to 7 or 14 etc.
+    min_exog_lag: int = 1
+
+    # Model
     use_param_grid: bool = False
 
-    # Outputs
-    output_dir_template: str = "artifacts_xgb_bdi_h{h}steps"
+    # Output
+    output_dir_template: str = "artifacts_xgb_bdi_residual_h{h}steps"
 
 
 # =========================
@@ -102,7 +116,6 @@ def evaluate_level_metrics(y_true_level, y_pred_level) -> Dict[str, float]:
 
 
 def evaluate_return_metrics(y_true_return, y_pred_return) -> Dict[str, float]:
-    # MAPE is unstable for returns near 0; prefer RMSE/MAE/sMAPE/R2
     return {
         "RMSE": rmse(y_true_return, y_pred_return),
         "MAE": mae(y_true_return, y_pred_return),
@@ -113,7 +126,7 @@ def evaluate_return_metrics(y_true_return, y_pred_return) -> Dict[str, float]:
 
 
 # =========================
-# Data + targets (STEP-AWARE)
+# Data
 # =========================
 def load_data(path: str, date_col: str) -> pd.DataFrame:
     if not os.path.exists(path):
@@ -127,181 +140,39 @@ def load_data(path: str, date_col: str) -> pd.DataFrame:
     return df
 
 
-def make_step_targets(
-    df: pd.DataFrame,
-    target_col: str,
-    horizon_steps: int,
-) -> pd.DataFrame:
-    """
-    Builds step-aware:
-      - bdi_t: BDI at origin index t
-      - bdi_future: BDI at index t + horizon_steps
-      - y_level: BDI_{t+H}
-      - y_return: log(BDI_{t+H}) - log(BDI_t)
-    """
-    if target_col not in df.columns:
-        raise ValueError(f"Missing target column '{target_col}' in dataset.")
-    out = df.copy()
-    out[target_col] = pd.to_numeric(out[target_col], errors="coerce")
-    out = out.dropna(subset=[target_col]).reset_index(drop=True)
-
-    out["bdi_t"] = out[target_col].astype(float)
-    out["bdi_future"] = out[target_col].shift(-horizon_steps).astype(float)
-    out = out.dropna(subset=["bdi_future"]).reset_index(drop=True)
-
-    # Ensure positive for log
-    out = out[(out["bdi_t"] > 0) & (out["bdi_future"] > 0)].reset_index(drop=True)
-    out["y_level"] = out["bdi_future"]
-    out["y_return"] = np.log(out["bdi_future"].to_numpy()) - np.log(out["bdi_t"].to_numpy())
-    return out
-
-
 # =========================
-# Feature selection
-# =========================
-def select_feature_columns(
-    df: pd.DataFrame,
-    target_col: str,
-    date_col: str,
-    include_current_bdi: bool,
-    strict_filter: bool,
-) -> List[str]:
-    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-
-    # drop targets and bookkeeping
-    drop = {date_col, target_col, "bdi_future", "y_level", "y_return"}
-    feature_cols = [c for c in numeric_cols if c not in drop]
-
-    # allow origin BDI explicitly
-    if include_current_bdi and "bdi_t" in df.columns and "bdi_t" not in feature_cols:
-        feature_cols.append("bdi_t")
-
-    if not strict_filter:
-        if not feature_cols:
-            raise ValueError("No numeric features available.")
-        return feature_cols
-
-    allowed_markers = ("lag", "roll", "moving", "avg", "mean", "_ma")
-    filtered = []
-    for col in feature_cols:
-        if col == "bdi_t":
-            filtered.append(col)
-            continue
-        cl = col.lower()
-        if any(m in cl for m in allowed_markers):
-            filtered.append(col)
-
-    if not filtered:
-        raise ValueError("No usable lag/rolling features found. Check Enriched_BDI_Dataset.csv columns.")
-    return filtered
-
-
-def build_feature_matrix(
-    df: pd.DataFrame,
-    target_col: str,
-    date_col: str,
-    include_current_bdi: bool,
-    strict_filter: bool,
-) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
-    """
-    Returns:
-      X: features at origin index t
-      y_return: log-return target
-      y_level: level target
-      dates: origin dates
-      bdi_t: origin BDI (for reconstruction/baselines)
-    """
-    cols = select_feature_columns(df, target_col, date_col, include_current_bdi, strict_filter)
-    X = df[cols].copy()
-
-    dates = df[date_col].to_numpy()
-    y_return = df["y_return"].to_numpy(dtype=float)
-    y_level = df["y_level"].to_numpy(dtype=float)
-    bdi_t = df["bdi_t"].to_numpy(dtype=float)
-
-    # Drop rows with NaNs in X (keep alignment)
-    mask = np.isfinite(y_return) & np.isfinite(y_level) & np.isfinite(bdi_t)
-    for c in X.columns:
-        mask &= np.isfinite(X[c].to_numpy(dtype=float))
-    X = X.loc[mask].reset_index(drop=True)
-    y_return = y_return[mask]
-    y_level = y_level[mask]
-    bdi_t = bdi_t[mask]
-    dates = dates[mask]
-
-    return X, y_return, y_level, dates, bdi_t
-
-
-# =========================
-# Walk-forward splits with PURGE GAP (STEP-AWARE)
-# =========================
-def walk_forward_splits(
-    n_samples: int,
-    n_splits: int,
-    test_window: int,
-    min_train_size: int,
-    step: int,
-    purge_gap: int,
-) -> List[Tuple[np.ndarray, np.ndarray]]:
-    splits: List[Tuple[np.ndarray, np.ndarray]] = []
-    train_end = min_train_size
-
-    for _ in range(n_splits):
-        train_effective_end = max(0, train_end - purge_gap)
-        test_start = train_end
-        test_end = test_start + test_window
-
-        if train_effective_end <= 0:
-            break
-        if test_end > n_samples:
-            break
-
-        train_idx = np.arange(0, train_effective_end)
-        test_idx = np.arange(test_start, test_end)
-        splits.append((train_idx, test_idx))
-
-        train_end += step
-
-    if not splits:
-        raise ValueError("No splits generated. Check min_train_size/test_window/purge_gap vs dataset length.")
-    return splits
-
-
-# =========================
-# Baselines (STEP-AWARE)
+# Baselines (STEP-BASED)
 # =========================
 def compute_step_baselines(
-    bdi_series_origin: np.ndarray,    # BDI at origin for each sample index
+    bdi_t_all: np.ndarray,
     test_idx: np.ndarray,
     seasonal_lag_steps: int = 7,
     ma_window_steps: int = 7,
 ) -> Dict[str, Dict[str, np.ndarray]]:
     """
-    Baselines for LEVEL at t+H (but evaluated against y_level which is already BDI_{t+H}):
-      - persistence_level: BDI(t)
-      - seasonal_naive_level: BDI(t - seasonal_lag_steps)
-      - moving_average_level: mean of BDI(t-1..t-ma_window_steps)
-    Also compute returns relative to origin BDI(t) for direction metrics.
+    Baselines predict LEVEL at t+H, compared against y_level which is BDI_{t+H}.
+
+    persistence_level(t) = BDI(t)
+    seasonal_level(t) = BDI(t - seasonal_lag_steps)
+    moving_avg_level(t) = mean(BDI(t-ma_window..t-1))
+
+    Also returns predicted returns relative to BDI(t).
     """
-    bdi_t = bdi_series_origin  # aligned with samples
+    bdi_t_all = np.asarray(bdi_t_all, dtype=float)
+    persistence_level = bdi_t_all[test_idx].astype(float)
 
-    # persistence: pred level = bdi_t
-    persistence_level = bdi_t[test_idx].astype(float)
-
-    # seasonal naive: bdi_t at (t - seasonal_lag_steps)
     seasonal_level = np.full(len(test_idx), np.nan, dtype=float)
     for j, i in enumerate(test_idx):
         k = i - seasonal_lag_steps
         if k >= 0:
-            seasonal_level[j] = float(bdi_t[k])
+            seasonal_level[j] = float(bdi_t_all[k])
 
-    # moving average over last ma_window_steps (exclude current)
     ma_level = np.full(len(test_idx), np.nan, dtype=float)
     for j, i in enumerate(test_idx):
         start = i - ma_window_steps
-        end = i  # exclude i
+        end = i
         if start >= 0:
-            ma_level[j] = float(np.mean(bdi_t[start:end]))
+            ma_level[j] = float(np.mean(bdi_t_all[start:end]))
 
     eps = 1e-8
     origin = np.maximum(persistence_level, eps)
@@ -320,29 +191,183 @@ def compute_step_baselines(
 
 
 # =========================
-# Train / eval one split
+# Feature Engineering (better + no fragmentation)
+# =========================
+def _to_numeric_df(df: pd.DataFrame, exclude: List[str]) -> pd.DataFrame:
+    out = df.copy()
+    for c in out.columns:
+        if c in exclude:
+            continue
+        if out[c].dtype == object:
+            out[c] = pd.to_numeric(out[c], errors="coerce")
+    return out
+
+
+def build_features_and_targets(df_raw: pd.DataFrame, cfg: Config) -> Tuple[pd.DataFrame, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Returns:
+      X (features at time t),
+      y_level = BDI_{t+H},
+      y_return = log(BDI_{t+H})-log(BDI_t),
+      dates (origin dates),
+      bdi_t (origin BDI)
+    """
+    if cfg.target_col not in df_raw.columns:
+        raise ValueError(f"Missing target column '{cfg.target_col}'")
+
+    df = df_raw.copy()
+    df = _to_numeric_df(df, exclude=[cfg.date_col])
+    df[cfg.target_col] = pd.to_numeric(df[cfg.target_col], errors="coerce")
+    df = df.dropna(subset=[cfg.target_col]).reset_index(drop=True)
+
+    # --- Targets (STEP-based) ---
+    bdi_t = df[cfg.target_col].astype(float)
+    bdi_future = df[cfg.target_col].shift(-cfg.horizon_steps).astype(float)
+    dates = df[cfg.date_col].to_numpy()
+
+    # keep rows where future exists
+    keep = bdi_future.notna().to_numpy()
+    df = df.loc[keep].reset_index(drop=True)
+    bdi_t = bdi_t.loc[keep].reset_index(drop=True).to_numpy(dtype=float)
+    bdi_future = bdi_future.loc[keep].reset_index(drop=True).to_numpy(dtype=float)
+    dates = dates[: len(df)]
+
+    # log-return target (needs positive)
+    eps = 1e-8
+    pos_mask = (bdi_t > 0) & (bdi_future > 0)
+    df = df.loc[pos_mask].reset_index(drop=True)
+    bdi_t = bdi_t[pos_mask]
+    bdi_future = bdi_future[pos_mask]
+    dates = dates[pos_mask]
+
+    y_level = bdi_future
+    y_return = np.log(np.maximum(bdi_future, eps)) - np.log(np.maximum(bdi_t, eps))
+
+    # --- Feature candidates ---
+    # Use all numeric columns except target itself; we will construct lags/rollings.
+    numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+    base_cols = [c for c in numeric_cols if c != cfg.target_col]
+
+    # Separate exogenous from target-derived features
+    # We will ALWAYS build strong target-derived features, plus exogenous lags (with min_exog_lag).
+    features = {}
+
+    # 1) Baseline feature explicitly (helps residual learning)
+    features["bdi_t"] = pd.Series(bdi_t)
+
+    # 2) Target-derived lags (BDI)
+    bdi_series = pd.Series(bdi_t)
+    for L in cfg.lags:
+        features[f"BDI_lag{L}"] = bdi_series.shift(L)
+
+    # 3) 1-step log return series (for momentum/volatility)
+    r1 = np.log(np.maximum(bdi_series, eps)).diff(1)
+    features["ret1"] = r1
+    for w in cfg.roll_windows:
+        features[f"ret1_roll_mean_{w}"] = r1.shift(1).rolling(w).mean()
+        features[f"ret1_roll_std_{w}"] = r1.shift(1).rolling(w).std()
+
+    # 4) BDI rolling stats (level)
+    for w in cfg.roll_windows:
+        features[f"BDI_roll_mean_{w}"] = bdi_series.shift(1).rolling(w).mean()
+        features[f"BDI_roll_std_{w}"] = bdi_series.shift(1).rolling(w).std()
+        features[f"BDI_roll_min_{w}"] = bdi_series.shift(1).rolling(w).min()
+        features[f"BDI_roll_max_{w}"] = bdi_series.shift(1).rolling(w).max()
+
+    # 5) Exogenous lags (all other numeric predictors)
+    # IMPORTANT: use at least min_exog_lag to simulate publication delay if needed
+    exog_cols = [c for c in base_cols if c != cfg.target_col]
+    for col in exog_cols:
+        s = pd.Series(df[col].to_numpy(dtype=float))
+        for L in cfg.lags:
+            if L < cfg.min_exog_lag:
+                continue
+            features[f"{col}_lag{L}"] = s.shift(L)
+
+        # optional rolling on exog (can help)
+        for w in cfg.roll_windows:
+            # rolling on past only
+            features[f"{col}_roll_mean_{w}"] = s.shift(1).rolling(w).mean()
+            features[f"{col}_roll_std_{w}"] = s.shift(1).rolling(w).std()
+
+    # Build X in one shot (avoids fragmentation)
+    X = pd.DataFrame(features)
+
+    # Remove rows with any NaN in X
+    mask = np.isfinite(X.to_numpy(dtype=float)).all(axis=1)
+    X = X.loc[mask].reset_index(drop=True)
+    y_level = y_level[mask]
+    y_return = y_return[mask]
+    dates = dates[mask]
+    bdi_t = bdi_t[mask]
+
+    return X, y_level, y_return, dates, bdi_t
+
+
+# =========================
+# Walk-forward splits with purge gap
+# =========================
+def walk_forward_splits(
+    n_samples: int,
+    n_splits: int,
+    test_window: int,
+    min_train_size: int,
+    step: int,
+    purge_gap: int,
+) -> List[Tuple[np.ndarray, np.ndarray]]:
+    splits: List[Tuple[np.ndarray, np.ndarray]] = []
+    train_end = min_train_size
+
+    for _ in range(n_splits):
+        train_effective_end = max(0, train_end - purge_gap)
+        test_start = train_end
+        test_end = test_start + test_window
+        if train_effective_end <= 0:
+            break
+        if test_end > n_samples:
+            break
+        train_idx = np.arange(0, train_effective_end)
+        test_idx = np.arange(test_start, test_end)
+        splits.append((train_idx, test_idx))
+        train_end += step
+
+    if not splits:
+        raise ValueError("No splits generated. Reduce min_train_size/test_window or increase dataset length.")
+    return splits
+
+
+# =========================
+# Train / Eval (Residual Learning)
 # =========================
 def train_eval_one_split(
     X: pd.DataFrame,
-    y_return: np.ndarray,
     y_level: np.ndarray,
+    y_return: np.ndarray,
     dates: np.ndarray,
     bdi_t_all: np.ndarray,
     train_idx: np.ndarray,
     test_idx: np.ndarray,
-    config: Config,
+    cfg: Config,
 ) -> Dict[str, object]:
+    # Baseline for this split (persistence)
+    base_pred_level_test = bdi_t_all[test_idx].astype(float)
+
+    # Residual target: delta over persistence at horizon
+    #   delta_level = BDI(t+H) - BDI(t)
+    y_delta = y_level - bdi_t_all
+
+    # Train / test
     X_train_full = X.iloc[train_idx]
-    y_train_full = y_return[train_idx]
+    y_train_full = y_delta[train_idx]  # residual target
 
     X_test = X.iloc[test_idx]
-    y_test_return = y_return[test_idx]
     y_test_level = y_level[test_idx]
+    y_test_return = y_return[test_idx]
     dates_test = dates[test_idx]
     bdi_origin_test = bdi_t_all[test_idx]
 
-    # Validation split (tail of training)
-    val_size = max(1, int(len(X_train_full) * config.val_fraction))
+    # Validation split (tail)
+    val_size = max(1, int(len(X_train_full) * cfg.val_fraction))
     X_train = X_train_full.iloc[:-val_size]
     y_train = y_train_full[:-val_size]
     X_val = X_train_full.iloc[-val_size:]
@@ -350,32 +375,11 @@ def train_eval_one_split(
 
     # Param grid (optional)
     param_grid = [
-        {
-            "max_depth": 6,
-            "min_child_weight": 1,
-            "subsample": 0.8,
-            "colsample_bytree": 0.8,
-            "reg_alpha": 0.0,
-            "reg_lambda": 1.0,
-        },
-        {
-            "max_depth": 4,
-            "min_child_weight": 5,
-            "subsample": 0.9,
-            "colsample_bytree": 0.9,
-            "reg_alpha": 0.1,
-            "reg_lambda": 1.0,
-        },
-        {
-            "max_depth": 8,
-            "min_child_weight": 3,
-            "subsample": 0.7,
-            "colsample_bytree": 0.7,
-            "reg_alpha": 0.0,
-            "reg_lambda": 2.0,
-        },
+        {"max_depth": 6, "min_child_weight": 1, "subsample": 0.8, "colsample_bytree": 0.8, "reg_alpha": 0.0, "reg_lambda": 1.0},
+        {"max_depth": 4, "min_child_weight": 5, "subsample": 0.9, "colsample_bytree": 0.9, "reg_alpha": 0.1, "reg_lambda": 1.0},
+        {"max_depth": 8, "min_child_weight": 3, "subsample": 0.7, "colsample_bytree": 0.7, "reg_alpha": 0.0, "reg_lambda": 2.0},
     ]
-    if not config.use_param_grid:
+    if not cfg.use_param_grid:
         param_grid = [param_grid[0]]
 
     best_model = None
@@ -383,22 +387,19 @@ def train_eval_one_split(
     best_params = None
 
     for params in param_grid:
+        # Robust objective helps in regime shifts (less blow-ups than square error)
         model = XGBRegressor(
-            n_estimators=4000,
-            learning_rate=0.03,
-            objective="reg:squarederror",
-            random_state=config.random_state,
+            n_estimators=5000,
+            learning_rate=0.02,
+            objective="reg:pseudohubererror",
+            random_state=cfg.random_state,
             n_jobs=-1,
             eval_metric="rmse",
-            early_stopping_rounds=150,
+            early_stopping_rounds=200,
             **params,
         )
-        model.fit(
-            X_train,
-            y_train,
-            eval_set=[(X_val, y_val)],
-            verbose=False,
-        )
+        model.fit(X_train, y_train, eval_set=[(X_val, y_val)], verbose=False)
+
         val_pred = model.predict(X_val)
         val_rmse = rmse(y_val, val_pred)
         if val_rmse < best_score:
@@ -406,47 +407,45 @@ def train_eval_one_split(
             best_model = model
             best_params = params
 
-    # Predict RETURNS and reconstruct LEVEL
-    y_pred_return = best_model.predict(X_test)
+    # Predict residual delta and reconstruct level forecast
+    delta_pred = best_model.predict(X_test)
+    y_pred_level = base_pred_level_test + delta_pred
+
+    # Implied returns for evaluation
     eps = 1e-8
-    bdi_origin_safe = np.maximum(bdi_origin_test, eps)
-    y_pred_level = bdi_origin_safe * np.exp(y_pred_return)
+    y_pred_return = np.log(np.maximum(y_pred_level, eps)) - np.log(np.maximum(bdi_origin_test, eps))
 
-    model_metrics_return = evaluate_return_metrics(y_test_return, y_pred_return)
+    # Metrics model
     model_metrics_level = evaluate_level_metrics(y_test_level, y_pred_level)
+    model_metrics_return = evaluate_return_metrics(y_test_return, y_pred_return)
 
-    # Baselines (step-aware)
-    baselines = compute_step_baselines(
-        bdi_series_origin=bdi_t_all,
-        test_idx=test_idx,
-        seasonal_lag_steps=7,
-        ma_window_steps=7,
-    )
-
+    # Baselines
+    baselines = compute_step_baselines(bdi_t_all, test_idx, seasonal_lag_steps=7, ma_window_steps=7)
     baseline_metrics = {}
     for name, preds in baselines.items():
         lvl = preds["level"]
-        mask_lvl = np.isfinite(lvl) & np.isfinite(y_test_level)
+        m_lvl = np.isfinite(lvl)
         baseline_metrics[name] = {
-            "level": evaluate_level_metrics(y_test_level[mask_lvl], lvl[mask_lvl]),
+            "level": evaluate_level_metrics(y_test_level[m_lvl], lvl[m_lvl]),
         }
         ret = preds["return"]
-        mask_ret = np.isfinite(ret) & np.isfinite(y_test_return)
-        baseline_metrics[name]["return"] = evaluate_return_metrics(y_test_return[mask_ret], ret[mask_ret])
+        m_ret = np.isfinite(ret)
+        baseline_metrics[name]["return"] = evaluate_return_metrics(y_test_return[m_ret], ret[m_ret])
 
     return {
         "model": best_model,
         "best_params": best_params,
         "dates_test": dates_test,
         "bdi_origin_test": bdi_origin_test,
-        "y_true_return": y_test_return,
-        "y_pred_return": y_pred_return,
         "y_true_level": y_test_level,
         "y_pred_level": y_pred_level,
+        "y_true_return": y_test_return,
+        "y_pred_return": y_pred_return,
         "baselines": baselines,
-        "metrics": {"return": model_metrics_return, "level": model_metrics_level},
+        "metrics": {"level": model_metrics_level, "return": model_metrics_return},
         "baseline_metrics": baseline_metrics,
         "X_test": X_test,
+        "base_pred_level_test": base_pred_level_test,
     }
 
 
@@ -454,7 +453,7 @@ def train_eval_one_split(
 # Aggregation + artifacts
 # =========================
 def aggregate_results(split_results: List[Dict[str, object]]) -> Dict[str, Dict[str, float]]:
-    def summarize_dicts(dicts: List[Dict[str, float]]) -> Dict[str, float]:
+    def summarize(dicts: List[Dict[str, float]]) -> Dict[str, float]:
         keys = list(dicts[0].keys())
         out = {}
         for k in keys:
@@ -463,65 +462,68 @@ def aggregate_results(split_results: List[Dict[str, object]]) -> Dict[str, Dict[
             out[f"{k}_std"] = float(np.std(vals, ddof=1)) if len(vals) > 1 else 0.0
         return out
 
-    model_return = [r["metrics"]["return"] for r in split_results]
     model_level = [r["metrics"]["level"] for r in split_results]
-
+    model_return = [r["metrics"]["return"] for r in split_results]
     summary = {
-        "model_return": summarize_dicts(model_return),
-        "model_level": summarize_dicts(model_level),
+        "model_level": summarize(model_level),
+        "model_return": summarize(model_return),
     }
 
     baseline_names = list(split_results[0]["baseline_metrics"].keys())
     for bn in baseline_names:
-        bret = [r["baseline_metrics"][bn]["return"] for r in split_results]
         blev = [r["baseline_metrics"][bn]["level"] for r in split_results]
-        summary[f"{bn}_return"] = summarize_dicts(bret)
-        summary[f"{bn}_level"] = summarize_dicts(blev)
+        bret = [r["baseline_metrics"][bn]["return"] for r in split_results]
+        summary[f"{bn}_level"] = summarize(blev)
+        summary[f"{bn}_return"] = summarize(bret)
 
     return summary
 
 
 def save_artifacts(
-    output_dir: str,
+    outdir: str,
     final_result: Dict[str, object],
     split_results: List[Dict[str, object]],
     summary: Dict[str, Dict[str, float]],
     feature_names: List[str],
-    config: Config,
+    cfg: Config,
 ) -> None:
-    os.makedirs(output_dir, exist_ok=True)
-    joblib.dump(final_result["model"], os.path.join(output_dir, "xgb_bdi_model.joblib"))
+    os.makedirs(outdir, exist_ok=True)
 
+    # model
+    joblib.dump(final_result["model"], os.path.join(outdir, "xgb_bdi_model.joblib"))
+
+    # predictions CSV (final window)
     pred_df = pd.DataFrame(
         {
             "date_origin": pd.to_datetime(final_result["dates_test"]),
             "bdi_origin": final_result["bdi_origin_test"],
+            "baseline_persistence_level": final_result["base_pred_level_test"],
             "y_true_level": final_result["y_true_level"],
             "y_pred_level": final_result["y_pred_level"],
             "y_true_return": final_result["y_true_return"],
             "y_pred_return": final_result["y_pred_return"],
-            "baseline_persistence_level": final_result["baselines"]["persistence"]["level"],
             "baseline_seasonal_level": final_result["baselines"]["seasonal_naive"]["level"],
             "baseline_movingavg_level": final_result["baselines"]["moving_average"]["level"],
         }
     )
-    pred_df.to_csv(os.path.join(output_dir, "predictions_last_window.csv"), index=False)
+    pred_df.to_csv(os.path.join(outdir, "predictions_last_window.csv"), index=False)
 
+    # plot level
     dates = pd.to_datetime(final_result["dates_test"])
     plt.figure(figsize=(12, 5))
     plt.plot(dates, final_result["y_true_level"], label="Actual BDI(t+H)", linewidth=2)
-    plt.plot(dates, final_result["y_pred_level"], label="XGBoost Forecast", linewidth=2)
-    plt.plot(dates, final_result["baselines"]["persistence"]["level"], label="Persistence", linewidth=1.5, alpha=0.8)
-    plt.title(f"BDI Forecast (H={config.horizon_steps} steps) — Final Window")
+    plt.plot(dates, final_result["y_pred_level"], label="XGB (residual over persistence)", linewidth=2)
+    plt.plot(dates, final_result["base_pred_level_test"], label="Persistence", linewidth=1.5, alpha=0.8)
+    plt.title(f"BDI Forecast (H={cfg.horizon_steps} steps) — Final Window")
     plt.xlabel("Origin date t")
     plt.ylabel("BDI at t+H")
     plt.grid(True, alpha=0.3)
     plt.legend()
     plt.tight_layout()
-    plt.savefig(os.path.join(output_dir, "actual_vs_pred_final.png"), dpi=200)
+    plt.savefig(os.path.join(outdir, "actual_vs_pred_final.png"), dpi=200)
     plt.close()
 
-    # SHAP final window
+    # SHAP
     try:
         explainer = shap.TreeExplainer(final_result["model"])
         shap_values = explainer.shap_values(final_result["X_test"])
@@ -529,32 +531,36 @@ def save_artifacts(
         plt.figure()
         shap.summary_plot(shap_values, final_result["X_test"], show=False)
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, "shap_beeswarm.png"), dpi=200)
+        plt.savefig(os.path.join(outdir, "shap_beeswarm.png"), dpi=200)
         plt.close()
 
         plt.figure()
         shap.summary_plot(shap_values, final_result["X_test"], show=False, plot_type="bar")
         plt.tight_layout()
-        plt.savefig(os.path.join(output_dir, "shap_bar.png"), dpi=200)
+        plt.savefig(os.path.join(outdir, "shap_bar.png"), dpi=200)
         plt.close()
     except Exception as e:
-        with open(os.path.join(output_dir, "shap_error.txt"), "w") as f:
+        with open(os.path.join(outdir, "shap_error.txt"), "w") as f:
             f.write(str(e))
 
-    with open(os.path.join(output_dir, "metrics.json"), "w") as f:
+    # metrics
+    with open(os.path.join(outdir, "metrics.json"), "w") as f:
         json.dump(
             {
                 "config": {
-                    "horizon_steps": config.horizon_steps,
-                    "n_splits": config.n_splits,
-                    "test_window": config.test_window,
-                    "min_train_size": config.min_train_size,
-                    "step": config.step,
-                    "val_fraction": config.val_fraction,
-                    "purge_gap": config.purge_gap if config.purge_gap != -1 else config.horizon_steps,
-                    "include_current_bdi": config.include_current_bdi,
-                    "strict_feature_filter": config.strict_feature_filter,
-                    "use_param_grid": config.use_param_grid,
+                    "horizon_steps": cfg.horizon_steps,
+                    "n_splits": cfg.n_splits,
+                    "test_window": cfg.test_window,
+                    "min_train_size": cfg.min_train_size,
+                    "step": cfg.step,
+                    "val_fraction": cfg.val_fraction,
+                    "purge_gap": cfg.purge_gap if cfg.purge_gap != -1 else cfg.horizon_steps,
+                    "lags": list(cfg.lags),
+                    "roll_windows": list(cfg.roll_windows),
+                    "min_exog_lag": cfg.min_exog_lag,
+                    "use_param_grid": cfg.use_param_grid,
+                    "objective": "reg:pseudohubererror",
+                    "residual_learning": "delta_level = y_level - persistence",
                 },
                 "per_split": [
                     {
@@ -566,7 +572,7 @@ def save_artifacts(
                 ],
                 "summary": summary,
                 "feature_count": len(feature_names),
-                "feature_names_head": feature_names[:20],
+                "feature_names_head": feature_names[:30],
             },
             f,
             indent=2,
@@ -577,20 +583,14 @@ def save_artifacts(
 # Main
 # =========================
 def main() -> None:
-    config = Config()
-    purge_gap = config.horizon_steps if config.purge_gap == -1 else config.purge_gap
-    output_dir = config.output_dir_template.format(h=config.horizon_steps)
+    cfg = Config()
+    purge_gap = cfg.horizon_steps if cfg.purge_gap == -1 else cfg.purge_gap
+    outdir = cfg.output_dir_template.format(h=cfg.horizon_steps)
 
-    df_raw = load_data(config.data_path, config.date_col)
-    df = make_step_targets(df_raw, config.target_col, config.horizon_steps)
+    df_raw = load_data(cfg.data_path, cfg.date_col)
 
-    X, y_return, y_level, dates, bdi_t_all = build_feature_matrix(
-        df=df,
-        target_col=config.target_col,
-        date_col=config.date_col,
-        include_current_bdi=config.include_current_bdi,
-        strict_filter=config.strict_feature_filter,
-    )
+    # Build features + targets (this is the big improvement)
+    X, y_level, y_return, dates, bdi_t_all = build_features_and_targets(df_raw, cfg)
     feature_names = X.columns.tolist()
 
     print(f"Rows: {len(X)}, Features: {len(feature_names)}")
@@ -599,29 +599,31 @@ def main() -> None:
 
     splits = walk_forward_splits(
         n_samples=len(X),
-        n_splits=config.n_splits,
-        test_window=config.test_window,
-        min_train_size=config.min_train_size,
-        step=config.step,
+        n_splits=cfg.n_splits,
+        test_window=cfg.test_window,
+        min_train_size=cfg.min_train_size,
+        step=cfg.step,
         purge_gap=purge_gap,
     )
 
     split_results: List[Dict[str, object]] = []
     for sidx, (train_idx, test_idx) in enumerate(splits, start=1):
         print(f"\nSplit {sidx}/{len(splits)}: train={len(train_idx)} test={len(test_idx)} (purge_gap={purge_gap})")
+
         res = train_eval_one_split(
             X=X,
-            y_return=y_return,
             y_level=y_level,
+            y_return=y_return,
             dates=dates,
             bdi_t_all=bdi_t_all,
             train_idx=train_idx,
             test_idx=test_idx,
-            config=config,
+            cfg=cfg,
         )
         split_results.append(res)
-        print("Model metrics (RETURN):", res["metrics"]["return"])
+
         print("Model metrics (LEVEL): ", res["metrics"]["level"])
+        print("Model metrics (RETURN):", res["metrics"]["return"])
 
         compact = {}
         for bname, bm in res["baseline_metrics"].items():
@@ -635,16 +637,9 @@ def main() -> None:
     summary = aggregate_results(split_results)
     final_result = split_results[-1]
 
-    save_artifacts(
-        output_dir=output_dir,
-        final_result=final_result,
-        split_results=split_results,
-        summary=summary,
-        feature_names=feature_names,
-        config=config,
-    )
+    save_artifacts(outdir, final_result, split_results, summary, feature_names, cfg)
 
-    print(f"\n✅ Artifacts saved to: {output_dir}")
+    print(f"\n✅ Artifacts saved to: {outdir}")
     print("\nSummary (model level RMSE mean/std):",
           summary["model_level"]["RMSE_mean"], summary["model_level"]["RMSE_std"])
     print("Summary (model return DirectionAcc mean/std):",
