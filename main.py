@@ -84,10 +84,10 @@ def main(args):
         "sp500",
     ]
 
-    # Επεξεργασία κενών τιμών (π.χ. Commodity Index) με forward/backward fill πριν το split
-    # (Αυτό ΔΕΝ δημιουργεί leakage γιατί δεν χρησιμοποιεί πληροφορία από το μέλλον στις μεταβλητές-χαρακτηριστικά;
-    # forward fill χρησιμοποιεί παρελθόν/τρέχον. Για ασφάλεια μπορούμε να κάνουμε ffill → bfill.)
-    df[feature_cols] = df[feature_cols].ffill().bfill()
+    # Επεξεργασία κενών τιμών (π.χ. Commodity Index) με forward fill πριν το split.
+    # Το forward fill χρησιμοποιεί μόνο παρελθοντικές τιμές και αποφεύγει leakage.
+    # Τα υπόλοιπα NaNs θα καλυφθούν από τον imputer μέσα στο pipeline μετά το split.
+    df[feature_cols] = df[feature_cols].ffill()
 
     # ---------------------------
     # 3) Create next-day (or next-h) target to avoid same-day leakage
@@ -121,17 +121,12 @@ def main(args):
     print(f"Test  period: {dates_test.min().date()} → {dates_test.max().date()}")
 
     # ---------------------------
-    # 5) Baseline (naive) model
-    # Προβλέπουμε ότι y_t ≈ BDI_t (δηλ. η τιμή της ίδιας μέρας, άρα για horizon=1 γίνεται previous-day BDI του στόχου)
-    # Για δίκαιη σύγκριση, ο naive predictor για y_{t} (BDI_{t+h}) είναι απλά y_{t-1} (shifted)
+    # 5) Baseline (Random Walk / Persistence)
+    # Προβλέπουμε ότι y_t ≈ BDI_t (δηλ. η τιμή της ίδιας μέρας).
+    # Αυτό είναι σωστό random-walk baseline για πρόβλεψη BDI_{t+h} με δεδομένα της ημέρας t.
     # ---------------------------
-    y_test_naive = df[target_col].shift(-(horizon+1)).iloc[split_idx:]  # (BDI_{t+h-1}) -> λίγο tricky
-    # Πιο απλά: baseline: predict y(t) = last available y_train's last value (πολύ φτωχή baseline)
-    # Θα δώσουμε και την απλούστερη baseline: y_pred_naive = previous available y value shifted by 1 in test
-    y_pred_naive = y_test.shift(1)
-    # Επειδή το πρώτο γίνεται NaN, συμπληρώνουμε με το πρώτο διαθέσιμο
-    y_pred_naive.iloc[0] = y_train.iloc[-1]
-    baseline_metrics = print_metrics(y_test.values, y_pred_naive.values, prefix="[Baseline] ")
+    y_pred_rw = df[target_col].iloc[split_idx:split_idx + len(y_test)].copy()
+    random_walk_metrics = print_metrics(y_test.values, y_pred_rw.values, prefix="[Random Walk] ")
 
     # ---------------------------
     # 6) Build pipeline (Imputer -> Scaler -> RF)
@@ -264,7 +259,7 @@ def main(args):
         "test_start": str(dates_test.min().date()),
         "test_end": str(dates_test.max().date()),
         "best_params": search.best_params_,
-        "baseline": baseline_metrics,
+        "random_walk": random_walk_metrics,
         "test_metrics": test_metrics
     }
     with open(os.path.join(args.output_dir, "results.json"), "w") as f:
