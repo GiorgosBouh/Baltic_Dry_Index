@@ -35,6 +35,15 @@ TEST_SIZE = 0.2
 RANDOM_STATE = 42
 
 # ---------------------------
+# Paper-worthy checklist (για τεκμηρίωση σε paper)
+# ---------------------------
+# 1) Baseline σύγκριση: random-walk/persistence στο ίδιο split & horizon.
+# 2) Έλεγχος διαθεσιμότητας features: αν κάποιο feature έχει καθυστέρηση,
+#    χρησιμοποίησε lag/shift για να μην υπάρχει leakage.
+# 3) Walk-forward validation: αξιολόγηση σε πολλαπλά χρονικά παράθυρα.
+# 4) Στατιστική σημαντικότητα: π.χ. Diebold-Mariano test έναντι baseline.
+
+# ---------------------------
 # 1. Φόρτωση Δεδομένων
 # ---------------------------
 df = pd.read_csv(DATA_PATH, parse_dates=["date"])
@@ -82,8 +91,20 @@ model = XGBRegressor(
 model.fit(X_train_scaled, y_train)
 
 # ---------------------------
-# 5. Αξιολόγηση
+# 5. Baseline (Random Walk / Persistence) + Αξιολόγηση
 # ---------------------------
+y_pred_rw = df[TARGET].iloc[split_idx:split_idx + len(y_test)].copy()
+rw_metrics = {
+    "RMSE": rmse(y_test, y_pred_rw),
+    "MAE": mean_absolute_error(y_test, y_pred_rw),
+    "MAPE": mape(y_test, y_pred_rw),
+    "R2": r2_score(y_test, y_pred_rw)
+}
+
+print("\nRandom Walk (Baseline):")
+for k, v in rw_metrics.items():
+    print(f"{k}: {v:.4f}")
+
 y_pred = model.predict(X_test_scaled)
 
 metrics = {
@@ -141,6 +162,6 @@ joblib.dump(model, os.path.join(OUTPUT_DIR, "xgb_bdi_model.joblib"))
 joblib.dump(scaler, os.path.join(OUTPUT_DIR, "scaler.joblib"))
 
 with open(os.path.join(OUTPUT_DIR, "test_metrics.json"), "w") as f:
-    json.dump(metrics, f, indent=2)
+    json.dump({"random_walk": rw_metrics, "xgboost": metrics}, f, indent=2)
 
 print("\n✅ Τα αποτελέσματα αποθηκεύτηκαν στον φάκελο:", OUTPUT_DIR)
