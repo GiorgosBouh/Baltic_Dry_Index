@@ -1,0 +1,39 @@
+{
+  "config": {
+    "horizon_steps": 10,
+    "event_method": "std",
+    "event_std_mult": 1.0,
+    "event_quantile": 0.8,
+    "event_prob_threshold": 0.55,
+    "purge_gap": 10,
+    "lags": [
+      1,
+      2,
+      3,
+      5,
+      7,
+      10,
+      14,
+      20,
+      30
+    ],
+    "roll_windows": [
+      7,
+      14,
+      30
+    ]
+  },
+  "run": {
+    "run": "h10_bdiOnly1_exogLag14_topK50",
+    "bdi_only": 1,
+    "min_exog_lag": 14,
+    "top_k": 50,
+    "rows": 1292,
+    "features_total": 23,
+    "splits": 5,
+    "mean_imp_rmse_overall": 0.016092663247945893,
+    "mean_imp_rmse_event_only": 0.0212061074379676,
+    "mean_diracc_overall": 0.04666666666666667,
+    "mean_diracc_event_only": 0.05375494071146245
+  }
+}

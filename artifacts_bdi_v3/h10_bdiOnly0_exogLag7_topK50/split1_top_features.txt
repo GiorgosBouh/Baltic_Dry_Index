@@ -1,0 +1,50 @@
+bdi_t
+BDI_lag1
+BDI_lag2
+BDI_lag3
+BDI_lag5
+BDI_lag7
+BDI_lag10
+BDI_lag14
+BDI_lag20
+BDI_lag30
+ret1
+ret1_roll_mean_7
+ret1_roll_std_7
+BDI_roll_mean_7
+BDI_roll_std_7
+ret1_roll_mean_14
+ret1_roll_std_14
+BDI_roll_mean_14
+BDI_roll_std_14
+ret1_roll_mean_30
+ret1_roll_std_30
+BDI_roll_mean_30
+BDI_roll_std_30
+Port Call - Number_lag7
+Port Call - Number_lag10
+Port Call - Number_lag14
+Port Call - Number_lag20
+Port Call - Number_lag30
+global_trade_lag7
+global_trade_lag10
+global_trade_lag14
+global_trade_lag20
+global_trade_lag30
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag7
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag10
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag14
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag20
+Total Bulkcarrier Bosphorus Strait Transits - DWT million_lag30
+Total Bulkcarrier Suez Canal Transits - DWT million_lag7
+Total Bulkcarrier Suez Canal Transits - DWT million_lag10
+Total Bulkcarrier Suez Canal Transits - DWT million_lag14
+Total Bulkcarrier Suez Canal Transits - DWT million_lag20
+Total Bulkcarrier Suez Canal Transits - DWT million_lag30
+Total Bulkcarrier Panama Canal Transits - DWT million_lag7
+Total Bulkcarrier Panama Canal Transits - DWT million_lag10
+Total Bulkcarrier Panama Canal Transits - DWT million_lag14
+Total Bulkcarrier Panama Canal Transits - DWT million_lag20
+Total Bulkcarrier Panama Canal Transits - DWT million_lag30
+Commodity Index_lag7
+Commodity Index_lag10
